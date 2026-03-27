@@ -77,15 +77,3 @@ evalforge/
     ├── package.json
     └── tailwind.config.js
 ```
-
----
-
-## Phase 1 Checklist (Eval Bench Core)
-- [ ] FastAPI backend running
-- [ ] PostgreSQL connected
-- [ ] Create / Read test suites and test cases
-- [ ] Run suite against 1 LLM (Gemini)
-- [ ] Score outputs (deterministic checks)
-- [ ] LLM-as-judge scoring
-- [ ] React dashboard showing results
-- [ ] Deploy (Railway + Vercel)
