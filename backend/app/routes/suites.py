@@ -19,7 +19,8 @@ class TestCaseCreate(BaseModel):
 class SuiteCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    test_cases: Optional[list[TestCaseCreate]] = []
+    test_cases: Optional[list[TestCaseCreate]] = []  # from API clients
+    cases: Optional[list[TestCaseCreate]] = []        # from frontend (alias)
 
 # ── Routes ────────────────────────────────────────────────
 
@@ -27,9 +28,13 @@ class SuiteCreate(BaseModel):
 def create_suite(data: SuiteCreate, db: Session = Depends(get_db)):
     suite = TestSuite(name=data.name, description=data.description)
     db.add(suite)
-    db.flush()  # Get the ID before committing
+    db.flush()
 
-    for tc in data.test_cases:
+    # Accept either `test_cases` (API) or `cases` (frontend)
+    all_cases = data.test_cases or data.cases or []
+    for tc in all_cases:
+        if not tc.prompt_template.strip():
+            continue  # skip blank cases
         test_case = TestCase(
             suite_id=suite.id,
             prompt_template=tc.prompt_template,
@@ -41,7 +46,20 @@ def create_suite(data: SuiteCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(suite)
-    return {"id": str(suite.id), "name": suite.name, "message": "Suite created"}
+    return {
+        "id": str(suite.id),
+        "name": suite.name,
+        "description": suite.description,
+        "test_case_count": len(suite.test_cases),
+        "cases": [
+            {
+                "id": str(tc.id),
+                "prompt_template": tc.prompt_template,
+                "expected_output": tc.expected_output,
+            }
+            for tc in suite.test_cases
+        ]
+    }
 
 
 @router.get("/")

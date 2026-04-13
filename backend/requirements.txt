@@ -3,9 +3,10 @@ uvicorn[standard]==0.34.0
 sqlalchemy==2.0.39
 psycopg2-binary==2.9.10
 pydantic-settings==2.8.1
-google-generativeai==0.8.4
+google-genai>=0.1.0
 openai==1.65.5
+anthropic>=0.25.0
 sentence-transformers==3.4.1
-scikit-learn==1.6.1
+scikit-learn>=1.8.0
 python-dotenv==1.0.1
 alembic==1.14.1

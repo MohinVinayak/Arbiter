@@ -1,6 +1,16 @@
 import re
 from app.services.llm_runner import run_llm
 
+# Lazy singleton — loaded once on first semantic score call
+_sentence_model = None
+
+def _get_sentence_model():
+    global _sentence_model
+    if _sentence_model is None:
+        from sentence_transformers import SentenceTransformer
+        _sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _sentence_model
+
 # ─────────────────────────────────────────────
 # LAYER 1: Deterministic Checks
 # ─────────────────────────────────────────────
@@ -70,11 +80,8 @@ def compute_semantic_score(output: str, expected: str) -> float | None:
         return None
 
     try:
-        from sentence_transformers import SentenceTransformer
         from sklearn.metrics.pairwise import cosine_similarity
-        import numpy as np
-
-        model = SentenceTransformer("all-MiniLM-L6-v2")  # Small, fast, free
+        model = _get_sentence_model()
         embeddings = model.encode([output, expected])
         score = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
         return round(float(score), 4)
@@ -108,7 +115,7 @@ SCORE: <number between 0.0 and 1.0>
 REASONING: <one sentence explanation>"""
 
 
-async def run_llm_judge(prompt: str, output: str, expected: str = None, judge_model: str = "gemini-2.0-flash") -> dict:
+async def run_llm_judge(prompt: str, output: str, expected: str = None, judge_model: str = "google/gemini-2.0-flash") -> dict:
     """
     Use an LLM to judge output quality.
     Returns: { score: float, reasoning: str }

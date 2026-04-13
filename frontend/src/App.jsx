@@ -1,6 +1,12 @@
-import { useState, useEffect, useRef } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+"use client";
 
+import { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from "recharts";
+
+// ============================================================================
+// 1. API SERVICE LAYER & CONSTANTS
+// ============================================================================
 const DYNAMIC_COLORS = [
   { color: "#FF5A26", bg: "rgba(255, 90, 38, 0.1)" }, 
   { color: "#10A37F", bg: "rgba(16, 163, 127, 0.1)" }, 
@@ -17,18 +23,44 @@ function formatModelLabel(rawId) {
   return name.replace(/\b\w/g, l => l.toUpperCase()).trim();
 }
 
-const MOCK_REASONINGS = [
-  "Excellent adherence to the prompt. The model captured the requested tone perfectly and provided a highly accurate, structured response.",
-  "The response was generally correct but struggled with conciseness. It included unnecessary conversational filler.",
-  "Strong performance on the core task. Reasoning was sound, but the formatting was slightly off compared to the reference.",
-  "Failed to adopt the required persona. Delivery was too academic for a customer support context.",
-  "Outstanding latency and good accuracy. It concisely addressed the prompt's constraints.",
-  "The model hallucinated a minor detail in the third paragraph, though the overall structure remained intact."
-];
+// ============================================================================
+// 2. MAGNETIC BUTTON COMPONENT
+// ============================================================================
+function MagneticButton({ children, className, onClick, style }) {
+  const ref = useRef(null);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
 
+  const handleMouse = (e) => {
+    const { clientX, clientY } = e;
+    const { height, width, left, top } = ref.current.getBoundingClientRect();
+    const middleX = clientX - (left + width / 2);
+    const middleY = clientY - (top + height / 2);
+    setPosition({ x: middleX * 0.15, y: middleY * 0.15 });
+  };
+
+  const reset = () => setPosition({ x: 0, y: 0 });
+
+  return (
+    <motion.button
+      ref={ref} className={className} style={style} onClick={onClick}
+      onMouseMove={handleMouse} onMouseLeave={reset}
+      animate={{ x: position.x, y: position.y }}
+      transition={{ type: "spring", stiffness: 400, damping: 25, mass: 0.5 }}
+    >
+      {children}
+    </motion.button>
+  );
+}
+
+// ============================================================================
+// 3. MAIN APPLICATION
+// ============================================================================
 export default function App() {
   const [page, setPage] = useState("dashboard");
-  const [isDark, setIsDark] = useState(() => JSON.parse(localStorage.getItem('themeDark')) || false);
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== 'undefined') return JSON.parse(localStorage.getItem('themeDark')) || false;
+    return false;
+  });
   
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
@@ -37,35 +69,66 @@ export default function App() {
   
   const [models, setModels] = useState({});
   const [selectedModels, setSelectedModels] = useState([]);
+  const [judgeModel, setJudgeModel] = useState("");
+  const [judgeDropdownOpen, setJudgeDropdownOpen] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
+
+  async function fetchRealBackendEval(suiteId, selectedModels, judgeId) {
+    try {
+      const response = await fetch('/api/runs/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suiteId: String(suiteId), models: selectedModels, judgeId })
+      });
+      if (!response.ok) throw new Error("Evaluation failed");
+      const data = await response.json();
+      return data.metrics;
+    } catch (err) {
+      console.error(err);
+      return [];
+    }
+  }
 
   useEffect(() => {
     async function fetchBackendModels() {
       try {
-        const backendModelList = [
-          "groq/llama-3.1-8b-instant", "groq/llama-3.3-70b-versatile",
-          "github/gpt-4o-mini", "mistralai/mistral-7b",
-          "google/gemini-2.5-flash", "anthropic/claude-3-haiku"
-        ];
+        const response = await fetch('/api/models');
+        if (!response.ok) throw new Error("Failed to fetch models");
+        
+        const data = await response.json();
+        const backendModelList = data.models; 
+        
         const generatedModels = {};
         backendModelList.forEach((id, index) => {
           const theme = DYNAMIC_COLORS[index % DYNAMIC_COLORS.length];
           generatedModels[id] = { color: theme.color, bg: theme.bg, label: formatModelLabel(id) };
         });
+        
         setModels(generatedModels);
-        if (backendModelList.length >= 2) setSelectedModels([backendModelList[0], backendModelList[2]]);
+        
+        if (backendModelList.length >= 2) {
+          setSelectedModels([backendModelList[0], backendModelList[2]]);
+          setJudgeModel(backendModelList[0]);
+        } else if (backendModelList.length > 0) {
+          setSelectedModels([backendModelList[0]]);
+          setJudgeModel(backendModelList[0]);
+        }
       } catch (error) {
-        console.error("Failed to load models:", error);
-      } finally { setIsLoadingModels(false); }
+        console.error("Backend disconnected. Models failed to load:", error);
+      } finally { 
+        setIsLoadingModels(false); 
+      }
     }
+    
     fetchBackendModels();
   }, []);
 
+  // --- Suite State Management ---
   const [suites, setSuites] = useState(() => {
     const saved = localStorage.getItem('evalSuites');
     return saved ? JSON.parse(saved) : [
-      { id: 1, name: "Customer Support Eval", description: "Testing sentiment analysis and tone mapping against angry users.", test_case_count: 24 },
-      { id: 2, name: "Code Generation Checks", description: "Verifying React and Python boilerplate generation accuracy.", test_case_count: 8 }
+      { id: "123e4567-e89b-12d3-a456-426614174000", name: "Customer Support Eval", description: "Testing sentiment analysis and tone mapping against angry users.", test_case_count: 1, cases: [{prompt_template: "User is angry.", expected_output: "De-escalate."}] },
+      { id: "123e4567-e89b-12d3-a456-426614174001", name: "Code Generation Checks", description: "Verifying React and Python boilerplate generation accuracy.", test_case_count: 1, cases: [{prompt_template: "Write a python flask app", expected_output: "Valid flask boilerplate"}] }
     ];
   });
 
@@ -77,6 +140,8 @@ export default function App() {
   useEffect(() => { localStorage.setItem('evalSuites', JSON.stringify(suites)); }, [suites]);
   useEffect(() => { localStorage.setItem('evalHistory', JSON.stringify(runHistory)); }, [runHistory]);
 
+  // --- Editor State ---
+  const [editingSuiteId, setEditingSuiteId] = useState(null);
   const [newSuiteName, setNewSuiteName] = useState("");
   const [newSuiteDesc, setNewSuiteDesc] = useState("");
   const [testCases, setTestCases] = useState([{ prompt_template: "", expected_output: "" }]);
@@ -87,46 +152,28 @@ export default function App() {
   // ── High-Performance Single Cursor & Background ──
   const cursorRef = useRef(null);
   const bgGlowRef = useRef(null);
-  
   const mousePos = useRef({ x: -1000, y: -1000 });
   const bgPos = useRef({ x: -1000, y: -1000 });
 
   useEffect(() => {
     let rafId;
-    
     const renderFrame = () => {
-      // GPU-accelerated transforms
-      if (cursorRef.current) {
-        cursorRef.current.style.transform = `translate3d(${mousePos.current.x}px, ${mousePos.current.y}px, 0) translate(-50%, -50%)`;
-      }
-      
-      // Smooth lerp for background glow
+      if (cursorRef.current) { cursorRef.current.style.transform = `translate3d(${mousePos.current.x}px, ${mousePos.current.y}px, 0) translate(-50%, -50%)`; }
       bgPos.current.x += (mousePos.current.x - bgPos.current.x) * 0.12;
       bgPos.current.y += (mousePos.current.y - bgPos.current.y) * 0.12;
-      
-      if (bgGlowRef.current) {
-        bgGlowRef.current.style.transform = `translate3d(${bgPos.current.x}px, ${bgPos.current.y}px, 0) translate(-50%, -50%)`;
-      }
-      
+      if (bgGlowRef.current) { bgGlowRef.current.style.transform = `translate3d(${bgPos.current.x}px, ${bgPos.current.y}px, 0) translate(-50%, -50%)`; }
       rafId = requestAnimationFrame(renderFrame);
     };
     rafId = requestAnimationFrame(renderFrame);
 
-    const handleMouseMove = (e) => { 
-      mousePos.current.x = e.clientX; 
-      mousePos.current.y = e.clientY; 
-    };
-    
+    const handleMouseMove = (e) => { mousePos.current.x = e.clientX; mousePos.current.y = e.clientY; };
     const handleMouseOver = (e) => {
       if (e.target.closest('.run-eval-btn')) {
-        document.body.classList.add('hovering-run-eval');
-        document.body.classList.remove('hovering-interactive');
+        document.body.classList.add('hovering-run-eval'); document.body.classList.remove('hovering-interactive');
       } else if (e.target.closest('button, input, textarea, select, .floating-card, .drag-handle, .model-card')) {
-        document.body.classList.add('hovering-interactive');
-        document.body.classList.remove('hovering-run-eval');
+        document.body.classList.add('hovering-interactive'); document.body.classList.remove('hovering-run-eval');
       } else {
-        document.body.classList.remove('hovering-interactive');
-        document.body.classList.remove('hovering-run-eval');
+        document.body.classList.remove('hovering-interactive'); document.body.classList.remove('hovering-run-eval');
       }
     };
 
@@ -140,22 +187,96 @@ export default function App() {
     };
   }, []);
 
-  const handleRunEval = (suite) => {
+  // --- Suite Operations ---
+  const resetSuiteForm = () => {
+    setEditingSuiteId(null);
+    setNewSuiteName("");
+    setNewSuiteDesc("");
+    setTestCases([{ prompt_template: "", expected_output: "" }]);
+  };
+
+  const handleEditSuite = (suite) => {
+    setEditingSuiteId(suite.id);
+    setNewSuiteName(suite.name);
+    setNewSuiteDesc(suite.description);
+    // If the suite has cases saved, load them. Otherwise load one empty case.
+    setTestCases(suite.cases && suite.cases.length > 0 ? suite.cases : [{ prompt_template: "", expected_output: "" }]);
+    setPage("new-suite");
+  };
+
+  const handleDeploySuite = async () => {
+    const validCases = testCases.filter(tc => tc.prompt_template.trim() !== "");
+    const finalCases = validCases.length > 0 ? validCases : [{ prompt_template: "", expected_output: "" }];
+    
+    const suiteData = {
+      name: newSuiteName || "Untitled Suite",
+      description: newSuiteDesc || "No description provided.",
+      cases: finalCases,
+      test_case_count: finalCases.length
+    };
+
+    try {
+      // 1. Try to send to backend (Will use PUT if editing, POST if new)
+      const method = editingSuiteId ? 'PUT' : 'POST';
+      const url = editingSuiteId ? `/api/suites/${editingSuiteId}` : '/api/suites';
+      
+      const response = await fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(suiteData)
+      });
+
+      if (!response.ok) throw new Error("Backend save failed");
+      const savedSuite = await response.json();
+
+      // Update state correctly based on whether it's an edit or new
+      if (editingSuiteId) {
+        setSuites(suites.map(s => s.id === editingSuiteId ? savedSuite : s));
+      } else {
+        setSuites([savedSuite, ...suites]);
+      }
+    } catch (error) {
+      console.warn("Backend disconnected or route missing, falling back to local browser storage.");
+      
+      // Fallback update logic
+      if (editingSuiteId) {
+        setSuites(suites.map(s => s.id === editingSuiteId ? { ...s, ...suiteData } : s));
+      } else {
+        const fallbackId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+        setSuites([{ id: fallbackId, ...suiteData }, ...suites]);
+      }
+    }
+    
+    setPage("dashboard");
+    resetSuiteForm();
+  };
+
+  const handleDeleteSuite = () => {
+    if (window.confirm("Are you sure you want to delete this test suite?")) {
+      setSuites(suites.filter(s => s.id !== editingSuiteId));
+      setPage("dashboard");
+      resetSuiteForm();
+    }
+  };
+
+  const handleRunEval = async (suite) => {
     if (selectedModels.length === 0) return alert("Please select at least one model.");
+    if (!judgeModel) return alert("Please select a judge model.");
+    
     setPage("results");
     setIsEvaluating(true);
 
-    setTimeout(() => {
-      setIsEvaluating(false);
-      const generatedResults = selectedModels.map((modelKey, index) => {
-        const score = Math.floor(Math.random() * 40) + 60;
-        const modelName = models[modelKey]?.label || modelKey;
+    try {
+      const metrics = await fetchRealBackendEval(suite.id, selectedModels, judgeModel);
+      const styledMetrics = metrics.map((m) => {
+        const modelKey = m.id;
         return {
-          name: modelName,
+          name: models[modelKey]?.label || modelKey,
           color: models[modelKey]?.color || "#a1a1aa",
-          score: score,
-          latency: Math.floor(Math.random() * 800) + 200,
-          reasoning: MOCK_REASONINGS[index % MOCK_REASONINGS.length]
+          score: Math.round(m.score || 0),
+          latency: m.latency || 0,
+          reasoning: m.reasoning || "No reasoning provided.",
+          outputs: m.outputs || []
         };
       });
       
@@ -163,29 +284,17 @@ export default function App() {
         id: Date.now(), 
         suiteName: suite.name, 
         timestamp: new Date().toLocaleString(),
-        metrics: generatedResults 
+        metrics: styledMetrics 
       };
       
       setEvalResults(newResult);
       setRunHistory([newResult, ...runHistory]);
-    }, 2500);
-  };
-
-  const handleDeploySuite = () => {
-    const validCases = testCases.filter(tc => tc.prompt_template.trim() !== "");
-    const actualCount = validCases.length > 0 ? validCases.length : 1;
-
-    setSuites([{
-      id: Date.now(),
-      name: newSuiteName || "Untitled Suite",
-      description: newSuiteDesc || "No description provided.",
-      test_case_count: actualCount
-    }, ...suites]);
-    
-    setPage("dashboard");
-    setNewSuiteName("");
-    setNewSuiteDesc("");
-    setTestCases([{ prompt_template: "", expected_output: "" }]);
+    } catch (error) {
+      alert("Failed to run evaluation. Check your backend console.");
+      setPage("dashboard");
+    } finally {
+      setIsEvaluating(false);
+    }
   };
 
   return (
@@ -206,21 +315,14 @@ export default function App() {
 
         <nav className="sidebar floating-panel fade-in-up">
           <div className="brand">
-            <div className="brand-logo">✦</div>
-            <span className="brand-text">EvalForge</span>
+            <span className="brand-text">ARBITER</span>
+            <span className="brand-sub">LLM Evaluator</span>
           </div>
 
           <div className="nav-links">
-            {[
-              { id: "dashboard", label: "Dashboard", icon: "◒" },
-              { id: "new-suite", label: "Create Suite", icon: "✚" },
-              { id: "results", label: "Run Results", icon: "❖" },
-            ].map(item => (
-              <button key={item.id} onClick={() => setPage(item.id)} className={`nav-btn ${page === item.id ? "active" : ""}`}>
-                <span className="nav-icon">{item.icon}</span>
-                {item.label}
-              </button>
-            ))}
+            <button onClick={() => { resetSuiteForm(); setPage("dashboard"); }} className={`nav-btn ${page === "dashboard" ? "active" : ""}`}><span className="nav-icon">◒</span>Dashboard</button>
+            <button onClick={() => { resetSuiteForm(); setPage("new-suite"); }} className={`nav-btn ${page === "new-suite" ? "active" : ""}`}><span className="nav-icon">✚</span>Create Suite</button>
+            <button onClick={() => setPage("results")} className={`nav-btn ${page === "results" ? "active" : ""}`}><span className="nav-icon">❖</span>Run Results</button>
           </div>
 
           <div className="models-section">
@@ -246,26 +348,76 @@ export default function App() {
               )}
             </div>
           </div>
+
+          {/* JUDGE SELECTOR (DROP-UP) */}
+          <div className="judge-section" style={{ position: 'relative' }}>
+            <div className="section-title">JUDGE MODEL</div>
+            {isLoadingModels ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '12px' }}>Loading...</div>
+            ) : (
+              <div style={{ position: 'relative', width: '100%' }}>
+                {judgeDropdownOpen && (
+                  <div className="judge-dropdown-menu">
+                    {Object.entries(models).map(([key, val]) => {
+                      const isJudge = judgeModel === key;
+                      return (
+                        <button
+                          key={key}
+                          className={`judge-card ${isJudge ? 'active' : ''}`}
+                          style={{ '--jc': val.color, '--jbg': val.bg }}
+                          onClick={() => { setJudgeModel(key); setJudgeDropdownOpen(false); }}
+                        >
+                          <div className="judge-indicator" style={{ background: isJudge ? val.color : 'var(--border)' }} />
+                          <span className="model-label">{val.label}</span>
+                          {isJudge && <span className="judge-badge">JUDGE</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                
+                <button
+                  className="judge-card active dropdown-toggle"
+                  style={{ '--jc': models[judgeModel]?.color || 'var(--border)', '--jbg': models[judgeModel]?.bg || 'transparent' }}
+                  onClick={() => setJudgeDropdownOpen(!judgeDropdownOpen)}
+                >
+                  <div className="judge-indicator" style={{ background: models[judgeModel]?.color || 'var(--border)' }} />
+                  <span className="model-label">{models[judgeModel]?.label || 'Select Judge'}</span>
+                  <span className="judge-badge" style={{ marginLeft: 'auto', background: 'transparent', color: 'var(--text-muted)' }}>
+                    {judgeDropdownOpen ? '▼' : '▲'} 
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
 
         <main className="main-canvas">
-          <div key={page} className="page-animate-reveal">
+          <AnimatePresence mode="wait">
             
             {/* DASHBOARD */}
             {page === "dashboard" && (
-              <div className="w-full max-w-1000 mx-auto">
+              <motion.div key="dash" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-1000 mx-auto">
                 <header className="page-header">
                   <h1 className="hero-title">
                     <div className="mask-text"><span className="slide-up-1">EVALUATION</span></div>
                     <div className="mask-text"><span className="slide-up-2">WORKSPACE</span></div>
                   </h1>
-                  <p className="hero-subtitle fade-in-delayed">Manage and execute your evaluation suites.</p>
+                  <p className="hero-subtitle fade-in-delayed">Select a suite to edit, or run an evaluation.</p>
                 </header>
 
                 <div className="bento-grid">
+                  <div className="floating-card bento-card empty-add-card stagger-anim" onClick={() => { resetSuiteForm(); setPage("new-suite"); }} style={{ '--delay': '0s' }}>
+                    <div className="add-icon">+</div>
+                    <h3 className="card-title" style={{marginBottom: 0}}>Build New Suite</h3>
+                  </div>
+
                   {suites.map((suite, idx) => (
-                    <div key={suite.id} className="floating-card bento-card stagger-anim" style={{ '--delay': `${idx * 0.1}s` }}>
-                      <div className="card-top"><span className="bento-badge">Suite 0{suites.length - idx}</span></div>
+                    <div key={suite.id} className="floating-card bento-card stagger-anim interactive-card" style={{ '--delay': `${(idx + 1) * 0.1}s` }} onClick={() => handleEditSuite(suite)}>
+                      <div className="card-top flex-between">
+                        <span className="bento-badge">Suite 0{suites.length - idx}</span>
+                        <span className="edit-hint">Click to edit</span>
+                      </div>
                       <h3 className="card-title">{suite.name}</h3>
                       <p className="card-desc">{suite.description}</p>
                       <div className="card-footer">
@@ -273,25 +425,20 @@ export default function App() {
                           <span className="stat-val">{suite.test_case_count}</span>
                           <span className="stat-label">Cases</span>
                         </div>
-                        <button className="btn-3d small run-eval-btn" onClick={() => handleRunEval(suite)}>Run Eval</button>
+                        <button className="btn-3d small run-eval-btn" onClick={(e) => { e.stopPropagation(); handleRunEval(suite); }}>Run Eval</button>
                       </div>
                     </div>
                   ))}
-                  
-                  <div className="floating-card bento-card empty-add-card stagger-anim" onClick={() => setPage("new-suite")} style={{ '--delay': `${suites.length * 0.1}s` }}>
-                    <div className="add-icon">+</div>
-                    <h3 className="card-title" style={{marginBottom: 0}}>Build New Suite</h3>
-                  </div>
                 </div>
-              </div>
+              </motion.div>
             )}
 
-            {/* NEW SUITE */}
+            {/* SUITE EDITOR */}
             {page === "new-suite" && (
-              <div className="w-full max-w-800 mx-auto">
+              <motion.div key="new" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header">
                   <h1 className="hero-title">
-                    <div className="mask-text"><span className="slide-up-1">BUILD A</span></div>
+                    <div className="mask-text"><span className="slide-up-1">{editingSuiteId ? 'EDIT YOUR' : 'BUILD A'}</span></div>
                     <div className="mask-text"><span className="slide-up-2">SUITE</span></div>
                   </h1>
                   <p className="hero-subtitle fade-in-delayed">Draft your parameters before deploying to the models.</p>
@@ -332,15 +479,22 @@ export default function App() {
                   ))}
                 </div>
 
-                <div style={{ textAlign: "right", marginTop: "32px", paddingBottom: "64px" }} className="fade-in-delayed">
-                  <button className="btn-3d large scale-click run-eval-btn" onClick={handleDeploySuite}>Deploy Test Suite</button>
+                <div className="deploy-footer flex-between fade-in-delayed" style={{ marginTop: "32px", paddingBottom: "64px" }}>
+                  {/* DELETE BUTTON SHOWS IF WE ARE EDITING */}
+                  {editingSuiteId ? (
+                    <button className="btn-text-danger" style={{fontSize: '14px', color: '#ff3b30'}} onClick={handleDeleteSuite}>Delete Suite</button>
+                  ) : <div></div>}
+                  
+                  <MagneticButton className="btn-3d large scale-click run-eval-btn" onClick={handleDeploySuite}>
+                    {editingSuiteId ? 'Save Updates' : 'Deploy Test Suite'}
+                  </MagneticButton>
                 </div>
-              </div>
+              </motion.div>
             )}
 
             {/* RESULTS PAGE */}
             {page === "results" && (
-              <div className="w-full max-w-800 mx-auto">
+              <motion.div key="res" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header flex-between align-start">
                   <div>
                     <h1 className="hero-title">
@@ -352,10 +506,10 @@ export default function App() {
                   
                   {runHistory.length > 0 && !isEvaluating && (
                     <div className="fade-in-delayed" style={{ textAlign: 'right', zIndex: 10 }}>
-                      <span className="section-title" style={{ display: 'block', marginBottom: 8 }}>Past Runs</span>
+                      <span className="section-title" style={{ display: 'block', marginBottom: 8, textTransform: 'none' }}>Past Runs</span>
                       <select 
                         className="inset-input mono" 
-                        style={{ padding: '8px 16px', fontSize: 12, width: 200, cursor: 'none' }}
+                        style={{ padding: '8px 16px', fontSize: 13, width: 200, cursor: 'none' }}
                         onChange={(e) => setEvalResults(runHistory.find(r => r.id.toString() === e.target.value))}
                         value={evalResults?.id || ""}
                       >
@@ -371,7 +525,7 @@ export default function App() {
                   <div className="floating-card empty-state stagger-anim" style={{ '--delay': '0.1s' }}>
                     <div className="spin-icon add-icon" style={{ color: 'var(--pop-primary)' }}>❖</div>
                     <h3 className="card-title" style={{ marginBottom: 0 }}>Running Eval</h3>
-                    <p style={{ color: 'var(--text-muted)', marginTop: '16px' }}>Pinging {selectedModels.length} models across the suite.</p>
+                    <p style={{ color: 'var(--text-muted)', marginTop: '16px' }}>Pinging {selectedModels.length} models across the suite. This may take a moment.</p>
                   </div>
                 )}
 
@@ -385,7 +539,7 @@ export default function App() {
                 )}
 
                 {!isEvaluating && evalResults && (
-                  <div className="stagger-anim" style={{ '--delay': '0.1s', paddingBottom: "64px" }}>
+                  <div className="stagger-anim" style={{ '--delay': '0.1s' }}>
                     <div className="bento-badge" style={{ marginBottom: '16px' }}>Target: {evalResults.suiteName}</div>
                     
                     <div className="bento-grid" style={{ marginBottom: '24px' }}>
@@ -393,6 +547,7 @@ export default function App() {
                         <h3 className="section-title">Aggregate Scores</h3>
                         <ResponsiveContainer width="100%" height={260}>
                           <BarChart data={evalResults.metrics} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.6}/>
                             <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 12, fontWeight: 600 }} axisLine={false} tickLine={false} />
                             <YAxis domain={[0, 100]} tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} />
                             <Tooltip cursor={{ fill: 'var(--tooltip-bg)' }} contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-surface)', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }} />
@@ -442,6 +597,22 @@ export default function App() {
                               <strong style={{ fontSize: '15px', color: 'var(--text-main)' }}>{m.name}</strong>
                             </div>
                             <p style={{ color: 'var(--text-muted)', fontSize: '14px', lineHeight: 1.6, margin: 0 }}>{m.reasoning}</p>
+                            
+                            {m.outputs && m.outputs.length > 0 && (
+                              <details style={{ marginTop: '16px' }}>
+                                <summary style={{ cursor: 'pointer', fontSize: '13px', color: 'var(--pop-primary)', fontWeight: 600, outline: 'none' }}>View Raw Inference Outputs</summary>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+                                  {m.outputs.map((out, j) => (
+                                    <div key={j} style={{ background: 'var(--bg-canvas)', border: '1px solid var(--border)', padding: '16px', borderRadius: '8px', overflowX: 'auto' }}>
+                                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Test Case 0{j + 1}</div>
+                                      <pre style={{ fontSize: '12px', whiteSpace: 'pre-wrap', color: 'var(--text-main)', margin: 0, fontFamily: "'JetBrains Mono', monospace" }}>
+                                        {out || "No output generated / null"}
+                                      </pre>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -449,9 +620,9 @@ export default function App() {
 
                   </div>
                 )}
-              </div>
+              </motion.div>
             )}
-          </div>
+          </AnimatePresence>
         </main>
       </div>
 
@@ -579,6 +750,10 @@ export default function App() {
 
         .floating-card { background: var(--panel-bg); backdrop-filter: blur(16px); border-radius: 24px; border: 1px solid var(--border); box-shadow: var(--shadow-float), var(--inner-glow); transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease, border-color 0.4s ease; }
         .floating-card:hover { transform: translateY(-6px); box-shadow: var(--shadow-hover), var(--inner-glow); border-color: var(--pop-primary); }
+        .interactive-card { cursor: pointer; }
+        
+        .edit-hint { font-size: 12px; font-weight: 600; color: var(--pop-primary); opacity: 0; transition: opacity 0.3s ease; }
+        .interactive-card:hover .edit-hint { opacity: 1; }
 
         .stagger-anim { opacity: 0; transform: translateY(20px); animation: springUp 0.7s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; animation-delay: var(--delay); }
         @keyframes springUp { to { opacity: 1; transform: translateY(0); } }
@@ -586,10 +761,11 @@ export default function App() {
         .fade-in-delayed { opacity: 0; animation: fadeIn 0.6s ease forwards; animation-delay: 0.3s; }
         .fade-in-up { opacity: 0; animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
         .bento-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
-        .bento-card { padding: 32px; display: flex; flex-direction: column; }
-        .bento-badge { background: var(--bg-canvas); color: var(--pop-primary); font-size: 12px; font-weight: 800; padding: 6px 12px; border-radius: 8px; margin-bottom: 24px; display: inline-block; border: 1px solid var(--border); }
+        .bento-card { padding: 32px; display: flex; flex-direction: column; justify-content: space-between; }
+        .bento-badge { background: var(--bg-canvas); color: var(--pop-primary); font-size: 12px; font-weight: 800; padding: 6px 12px; border-radius: 8px; display: inline-block; border: 1px solid var(--border); }
         
         .card-desc { color: var(--text-muted); font-size: 15px; line-height: 1.5; margin-bottom: 32px; flex-grow: 1; }
         .card-footer { display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border); padding-top: 24px; }
@@ -601,6 +777,7 @@ export default function App() {
         .empty-add-card { 
           position: relative; overflow: hidden; background: transparent; border: 2px dashed var(--border); box-shadow: none;
           align-items: center; justify-content: center; text-align: center; color: var(--text-muted);
+          min-height: 220px;
         }
         .empty-add-card::before {
           content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0;
@@ -630,22 +807,23 @@ export default function App() {
 
         .btn-secondary { background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--border); padding: 8px 16px; border-radius: 10px; font-family: inherit; font-weight: 700; font-size: 13px; box-shadow: 0 2px 0 var(--border); transition: all 0.1s ease; }
         .btn-secondary:active { transform: translateY(2px); box-shadow: 0 0 0 transparent; }
-        .btn-text-danger { background: transparent; border: none; color: #ff3b30; font-family: inherit; font-size: 12px; font-weight: 700; margin-top: 8px; opacity: 0.8; transition: opacity 0.2s ease; }
+        
+        .btn-text-danger { background: transparent; border: none; color: #ff3b30; font-family: inherit; font-size: 12px; font-weight: 700; margin-top: 8px; opacity: 0.8; transition: opacity 0.2s ease; cursor: pointer; }
         .btn-text-danger:hover { opacity: 1; text-decoration: underline; }
 
         /* Navigation Links */
-        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 48px; }
-        .brand-logo { width: 36px; height: 36px; background: var(--pop-primary); border-radius: 12px; display: grid; place-items: center; color: #fff; font-size: 18px; font-weight: bold; }
-        .brand-text { font-size: 24px; font-weight: 800; letter-spacing: -0.04em; }
+        .brand { display: flex; flex-direction: column; gap: 4px; margin-bottom: 48px; }
+        .brand-text { font-size: 30px; font-weight: 900; letter-spacing: 0.18em; background: linear-gradient(135deg, var(--pop-primary) 0%, #a78bfa 50%, var(--pop-primary) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: none; line-height: 1; }
+        .brand-sub { font-size: 11px; font-weight: 800; color: var(--text-muted); letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.7; }
         .nav-links { display: flex; flex-direction: column; gap: 8px; margin-bottom: auto; }
-        .nav-btn { background: transparent; border: none; color: var(--text-muted); font-family: inherit; font-weight: 700; font-size: 15px; padding: 14px 16px; border-radius: 12px; display: flex; align-items: center; gap: 16px; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .nav-btn { background: transparent; border: none; color: var(--text-muted); font-family: inherit; font-weight: 700; font-size: 15px; padding: 14px 16px; border-radius: 12px; display: flex; align-items: center; gap: 16px; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); cursor: pointer; }
         .nav-btn:hover { background: var(--border); color: var(--text-main); transform: translateX(6px); }
         .nav-btn.active { background: var(--bg-surface); color: var(--pop-primary); transform: translateX(6px); box-shadow: var(--shadow-float); border: 1px solid var(--border); }
 
         /* Models Stack */
         .models-section { padding-top: 32px; border-top: 1px dashed var(--border); }
         .models-stack { display: flex; flex-direction: column; gap: 8px; }
-        .model-card { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 700; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .model-card { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 700; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); cursor: pointer; }
         .model-card .model-label { color: var(--text-muted); transition: color 0.3s ease; }
         .model-card:hover { background: var(--mbg); border-color: var(--mc); transform: translateY(-3px) scale(1.02); box-shadow: 0 8px 20px rgba(0,0,0,0.05); }
         .model-card:hover .model-label { color: var(--mc); }
@@ -679,6 +857,20 @@ export default function App() {
 
         .spin-icon { display: inline-block; animation: spin 2s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Judge Drop-up Section */
+        .judge-section { padding-top: 24px; border-top: 1px solid var(--border); margin-top: auto; }
+        .judge-dropdown-menu { position: absolute; bottom: calc(100% + 8px); left: 0; width: 100%; display: flex; flexDirection: column; gap: 4px; padding: 12px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 -10px 40px rgba(0,0,0,0.1); z-index: 50; max-height: 250px; overflow-y: auto; animation: popUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .judge-card { position: relative; width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: transparent; border: 1px solid transparent; border-radius: 10px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275); color: var(--text-muted); }
+        .judge-card:hover { background: var(--bg-surface); border-color: var(--border); transform: translateY(-2px); }
+        .judge-card:hover .model-label { color: var(--text-main); }
+        .judge-card.active { background: var(--bg-surface); border-color: var(--border); box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+        .judge-card.active .model-label { color: var(--text-main); font-weight: 600; }
+        .dropdown-toggle { border-color: var(--border); background: var(--bg-canvas); }
+        .judge-indicator { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; transition: background 0.3s ease; }
+        .judge-badge { margin-left: auto; font-size: 9px; font-weight: 900; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 6px; background: var(--jc, var(--pop-primary)); color: var(--bg-surface); }
+        
+        @keyframes popUp { from { opacity: 0; transform: translateY(10px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
       `}</style>
     </>
   );
