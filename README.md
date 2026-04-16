@@ -2,7 +2,7 @@
 
 **LLM Eval Platform** — A professional, high-performance web platform for massively parallel LLM evaluation and telemetry analysis. Arbiter allows engineers and prompt designers to rapidly test prompt configurations against expected outputs, across an array of frontier AI models simultaneously.
 
-## 🚀 Key Features
+##  Key Features
 
 - **Multi-Model Concurrency**: Fire multiple LLM completions at once (Gemini, Groq/LLaMA, GPT-4o-mini, Anthropic).
 - **Three-Tier Evaluation Engine**:
@@ -14,7 +14,7 @@
 - **Suite Management**: Create, edit, and delete test suites with full CRUD backed by PostgreSQL.
 - **Run History**: Browse, compare, and revisit past evaluation runs.
 
-## 🛠️ Stack
+##  Stack
 
 | Layer | Technology |
 |---|---|
@@ -23,7 +23,7 @@
 | Database | PostgreSQL |
 | Orchestration | Docker Compose |
 
-## 📦 Quickstart (Docker)
+##  Quickstart (Docker)
 
 1. Copy `.env.example` to `backend/.env` and populate your API keys:
 ```env
@@ -40,7 +40,7 @@ docker-compose up --build -d
 
 3. Open `http://localhost/` (Nginx) or `http://localhost:5173/` (Vite dev).
 
-## 👨‍💻 Local Development
+##  Local Development
 
 **Backend:**
 ```bash
@@ -58,7 +58,7 @@ npm install
 npx vite
 ```
 
-## 📡 API Endpoints
+##  API Endpoints
 
 | Method | Endpoint | Description |
 |---|---|---|
