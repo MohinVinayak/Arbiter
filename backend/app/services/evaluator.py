@@ -85,7 +85,9 @@ def compute_semantic_score(output: str, expected: str) -> float | None:
         embeddings = model.encode([output, expected])
         score = cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
         return round(float(score), 4)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("uvicorn.error").warning(f"Semantic scoring failed: {e}")
         return None
 
 

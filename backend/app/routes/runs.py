@@ -13,10 +13,13 @@ from app.services.evaluator import (
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
+import logging
+import uuid
 
 router = APIRouter()
 
-# ── Pydantic Schemas ──────────────────────────────────────
+logger = logging.getLogger("uvicorn.error")
+
 
 class RunCreate(BaseModel):
     suite_id: str
@@ -30,7 +33,8 @@ class EvalRequest(BaseModel):
     judgeId: Optional[str] = "google/gemini-2.0-flash"
 
 
-# ── Core eval logic ───────────────────────────────────────
+# ── Pydantic Schemas ──────────────────────────────────────
+
 
 async def _run_eval(suite: TestSuite, models: list[str], judge_model: str, db: Session):
     """
@@ -118,13 +122,7 @@ async def _run_eval(suite: TestSuite, models: list[str], judge_model: str, db: S
 
 
 # ── Routes ────────────────────────────────────────────────
-
-import logging
-
-logger = logging.getLogger("uvicorn.error")
-
-import uuid
-
+# ── Core eval logic ───────────────────────────────────────
 @router.post("/evaluate")
 async def run_evaluate(request: EvalRequest, db: Session = Depends(get_db)):
     """Called by the frontend. Runs eval and returns {metrics} synchronously."""
@@ -184,7 +182,11 @@ def list_all_runs(db: Session = Depends(get_db)):
 
 @router.get("/suite/{suite_id}")
 def get_runs_for_suite(suite_id: str, db: Session = Depends(get_db)):
-    runs = db.query(Run).filter(Run.suite_id == suite_id).order_by(Run.created_at.desc()).all()
+    try:
+        suite_uuid = uuid.UUID(suite_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="suite_id must be a valid UUID")
+    runs = db.query(Run).filter(Run.suite_id == suite_uuid).order_by(Run.created_at.desc()).all()
     return [
         {
             "id": str(r.id),
@@ -199,11 +201,15 @@ def get_runs_for_suite(suite_id: str, db: Session = Depends(get_db)):
 
 @router.get("/{run_id}")
 def get_run(run_id: str, db: Session = Depends(get_db)):
-    run = db.query(Run).filter(Run.id == run_id).first()
+    try:
+        run_uuid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="run_id must be a valid UUID")
+    run = db.query(Run).filter(Run.id == run_uuid).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    results = db.query(Result).filter(Result.run_id == run_id).all()
+    results = db.query(Result).filter(Result.run_id == run_uuid).all()
     return {
         "id": str(run.id),
         "suite_id": str(run.suite_id),

@@ -16,9 +16,9 @@ env_path = Path(__file__).resolve().parent.parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
 print("\n--- Arbiter Startup: API Key Status ---")
-keys = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+keys = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "MISTRAL_API_KEY"]
 for key in keys:
-    status = "✅ Found" if os.getenv(key) else "❌ Not Found"
+    status = "[OK]" if os.getenv(key) else "[MISSING]"
     print(f"{key:20}: {status}")
 print("------------------------------------------\n")
 
@@ -60,6 +60,18 @@ def get_available_models():
         available_models.append("anthropic/claude-3-haiku-20240307")
     if os.getenv("OPENAI_API_KEY") or os.getenv("GITHUB_TOKEN"):
         available_models.append("github/gpt-4o-mini")
+    if os.getenv("DEEPSEEK_API_KEY"):
+        available_models.extend(["deepseek/deepseek-chat", "deepseek/deepseek-reasoner"])
+    if os.getenv("MISTRAL_API_KEY"):
+        available_models.extend(["mistral/mistral-large-latest", "mistral/mistral-small-latest"])
+    
+    # Inject Custom Models from .env
+    custom_models = os.getenv("CUSTOM_MODELS")
+    if custom_models:
+        for m in custom_models.split(","):
+            m = m.strip()
+            if m and m not in available_models:
+                available_models.append(m)
     
     # Fallback to mocks so the UI remains interactive during local dev
     if not available_models:

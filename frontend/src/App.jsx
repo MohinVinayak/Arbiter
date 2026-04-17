@@ -107,7 +107,7 @@ export default function App() {
         setModels(generatedModels);
         
         if (backendModelList.length >= 2) {
-          setSelectedModels([backendModelList[0], backendModelList[2]]);
+          setSelectedModels([backendModelList[0], backendModelList[1]]);
           setJudgeModel(backendModelList[0]);
         } else if (backendModelList.length > 0) {
           setSelectedModels([backendModelList[0]]);
@@ -350,42 +350,47 @@ export default function App() {
           </div>
 
           {/* JUDGE SELECTOR (DROP-UP) */}
-          <div className="judge-section" style={{ position: 'relative' }}>
+          <div className="judge-section">
             <div className="section-title">JUDGE MODEL</div>
             {isLoadingModels ? (
               <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '12px' }}>Loading...</div>
             ) : (
               <div style={{ position: 'relative', width: '100%' }}>
-                {judgeDropdownOpen && (
-                  <div className="judge-dropdown-menu">
-                    {Object.entries(models).map(([key, val]) => {
-                      const isJudge = judgeModel === key;
-                      return (
-                        <button
-                          key={key}
-                          className={`judge-card ${isJudge ? 'active' : ''}`}
-                          style={{ '--jc': val.color, '--jbg': val.bg }}
-                          onClick={() => { setJudgeModel(key); setJudgeDropdownOpen(false); }}
-                        >
-                          <div className="judge-indicator" style={{ background: isJudge ? val.color : 'var(--border)' }} />
-                          <span className="model-label">{val.label}</span>
-                          {isJudge && <span className="judge-badge">JUDGE</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                <AnimatePresence>
+                  {judgeDropdownOpen && (
+                    <motion.div 
+                      className="judge-dropdown-menu"
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      transition={{ duration: 0.15, ease: "easeOut" }}
+                    >
+                      {Object.entries(models).map(([key, val]) => {
+                        const isJudge = judgeModel === key;
+                        return (
+                          <button
+                            key={key}
+                            className={`judge-menu-item ${isJudge ? 'active' : ''}`}
+                            onClick={() => { setJudgeModel(key); setJudgeDropdownOpen(false); }}
+                          >
+                            <div className="judge-indicator" style={{ background: isJudge ? val.color : 'var(--border)' }} />
+                            <span className="model-label">{val.label}</span>
+                          </button>
+                        );
+                      })}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 
                 <button
-                  className="judge-card active dropdown-toggle"
-                  style={{ '--jc': models[judgeModel]?.color || 'var(--border)', '--jbg': models[judgeModel]?.bg || 'transparent' }}
+                  className="judge-select-btn"
                   onClick={() => setJudgeDropdownOpen(!judgeDropdownOpen)}
                 >
-                  <div className="judge-indicator" style={{ background: models[judgeModel]?.color || 'var(--border)' }} />
-                  <span className="model-label">{models[judgeModel]?.label || 'Select Judge'}</span>
-                  <span className="judge-badge" style={{ marginLeft: 'auto', background: 'transparent', color: 'var(--text-muted)' }}>
-                    {judgeDropdownOpen ? '▼' : '▲'} 
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div className="judge-indicator" style={{ background: models[judgeModel]?.color || 'var(--border)' }} />
+                    <span className="model-label">{models[judgeModel]?.label || 'Select Judge'}</span>
+                  </div>
+                  <span className="chevron-icon" style={{ transform: judgeDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
                 </button>
               </div>
             )}
@@ -859,18 +864,18 @@ export default function App() {
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
         /* Judge Drop-up Section */
-        .judge-section { padding-top: 24px; border-top: 1px solid var(--border); margin-top: auto; }
-        .judge-dropdown-menu { position: absolute; bottom: calc(100% + 8px); left: 0; width: 100%; display: flex; flexDirection: column; gap: 4px; padding: 12px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 -10px 40px rgba(0,0,0,0.1); z-index: 50; max-height: 250px; overflow-y: auto; animation: popUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-        .judge-card { position: relative; width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: transparent; border: 1px solid transparent; border-radius: 10px; font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275); color: var(--text-muted); }
-        .judge-card:hover { background: var(--bg-surface); border-color: var(--border); transform: translateY(-2px); }
-        .judge-card:hover .model-label { color: var(--text-main); }
-        .judge-card.active { background: var(--bg-surface); border-color: var(--border); box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
-        .judge-card.active .model-label { color: var(--text-main); font-weight: 600; }
-        .dropdown-toggle { border-color: var(--border); background: var(--bg-canvas); }
-        .judge-indicator { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; transition: background 0.3s ease; }
-        .judge-badge { margin-left: auto; font-size: 9px; font-weight: 900; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 6px; background: var(--jc, var(--pop-primary)); color: var(--bg-surface); }
+        .judge-section { padding-top: 24px; border-top: 1px solid var(--border); margin-top: auto; position: relative; }
         
-        @keyframes popUp { from { opacity: 0; transform: translateY(10px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .judge-select-btn { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text-main); font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .judge-select-btn:hover { background: var(--input-bg); border-color: var(--pop-primary); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .chevron-icon { font-size: 10px; color: var(--text-muted); transition: transform 0.3s ease; }
+        
+        .judge-dropdown-menu { position: absolute; bottom: calc(100% + 12px); left: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 8px; background: var(--panel-bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 -10px 40px rgba(0,0,0,0.2), inset 0 1px 1px rgba(255,255,255,0.05); z-index: 50; max-height: 280px; overflow-y: auto; transform-origin: bottom center; }
+        
+        .judge-menu-item { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: transparent; border: none; border-radius: 10px; color: var(--text-muted); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; text-align: left; width: 100%; }
+        .judge-menu-item:hover { background: rgba(255,255,255,0.05); color: var(--text-main); padding-left: 18px; }
+        .judge-menu-item.active { background: rgba(255,255,255,0.1); color: var(--text-main); font-weight: 700; }
+        .judge-indicator { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; transition: background 0.3s ease; }
       `}</style>
     </>
   );

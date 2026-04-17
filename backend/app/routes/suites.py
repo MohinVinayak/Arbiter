@@ -99,6 +99,51 @@ def get_suite(suite_id: str, db: Session = Depends(get_db)):
     }
 
 
+@router.put("/{suite_id}")
+def update_suite(suite_id: str, data: SuiteCreate, db: Session = Depends(get_db)):
+    """Update an existing suite's name, description, and test cases.
+    Replaces all existing test cases with the new ones.
+    """
+    suite = db.query(TestSuite).filter(TestSuite.id == suite_id).first()
+    if not suite:
+        raise HTTPException(status_code=404, detail="Suite not found")
+
+    suite.name = data.name
+    suite.description = data.description
+
+    # Delete existing test cases and replace with the new set
+    db.query(TestCase).filter(TestCase.suite_id == suite_id).delete(synchronize_session=False)
+
+    all_cases = data.test_cases or data.cases or []
+    for tc in all_cases:
+        if not tc.prompt_template.strip():
+            continue
+        db.add(TestCase(
+            suite_id=suite.id,
+            prompt_template=tc.prompt_template,
+            input_variables=tc.input_variables,
+            expected_output=tc.expected_output,
+            checks=tc.checks
+        ))
+
+    db.commit()
+    db.refresh(suite)
+    return {
+        "id": str(suite.id),
+        "name": suite.name,
+        "description": suite.description,
+        "test_case_count": len(suite.test_cases),
+        "cases": [
+            {
+                "id": str(tc.id),
+                "prompt_template": tc.prompt_template,
+                "expected_output": tc.expected_output,
+            }
+            for tc in suite.test_cases
+        ]
+    }
+
+
 @router.delete("/{suite_id}")
 def delete_suite(suite_id: str, db: Session = Depends(get_db)):
     suite = db.query(TestSuite).filter(TestSuite.id == suite_id).first()
