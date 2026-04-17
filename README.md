@@ -67,6 +67,16 @@ docker-compose up --build -d
 
 3. Open `http://localhost/` (Nginx) or `http://localhost:5173/` (Vite dev).
 
+##  Injecting Custom Models
+
+Arbiter natively populates its UI with the best default models for every API key you provide. However, you can inject highly specific, newly-released, or fine-tuned models directly into the UI without changing any code.
+
+Simply add them as a comma-separated list to the `CUSTOM_MODELS` variable in your `backend/.env` file:
+```env
+CUSTOM_MODELS="mistral/open-mistral-nemo,groq/llama-guard-3-8b,deepseek/deepseek-coder"
+```
+*Note: Ensure you prefix the model name with the provider (e.g., `mistral/`, `groq/`, `deepseek/`, `google/`, `anthropic/`, `github/`) so the backend knows which API key to route it through.*
+
 ##  Local Development
 
 **Backend:**
