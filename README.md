@@ -14,6 +14,30 @@
 - **Suite Management**: Create, edit, and delete test suites with full CRUD backed by PostgreSQL.
 - **Run History**: Browse, compare, and revisit past evaluation runs.
 
+##  Platform Walkthrough
+
+A visual tour of the Arbiter evaluation platform in action.
+
+### 1. Dashboard Overview
+![Dashboard displaying evaluation runs and aggregated metrics](assets/screenshots/dashboard.png)
+*The centralized hub for tracking your LLM evaluation suites and viewing macro score correlations.*
+
+### 2. Creating a Test Suite
+![Suite creation UI with code inputs and JSON schema toggles](assets/screenshots/ts1.png)
+
+![Suite creation](assets/screenshots/ts2.png)
+*Defining precise deterministic evaluation controls (RegEx, length, strict match) for test cases.*
+
+
+### 3. LLM-as-a-Judge Analysis
+![Graphs](assets/screenshots/graphs.png)
+![Detailed view of the Judge reasoning pane](assets/screenshots/op.png)
+*Leveraging strong reasoning models (like GPT-4o or Llama 3.3 70B) to score and ruthlessly critique the raw outputs of other models.*
+
+### 4. Raw Inference Tracing
+![Codebox showing standard unformatted text outputs next to structured JSON](assets/screenshots/raw_logs.png)
+*Inspecting the raw outputs to diagnose why specific models passed or failed semantic similarity thresholds.*
+
 ##  Stack
 
 | Layer | Technology |
@@ -31,6 +55,9 @@ GROQ_API_KEY=...
 GEMINI_API_KEY=...
 ANTHROPIC_API_KEY=...
 GITHUB_TOKEN=...
+DEEPSEEK_API_KEY=...
+MISTRAL_API_KEY=...
+CUSTOM_MODELS=...
 ```
 
 2. Launch:

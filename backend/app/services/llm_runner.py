@@ -34,14 +34,10 @@ deepseek_client = (
     if settings.DEEPSEEK_API_KEY else None
 )
 
-try:
-    from mistralai import Mistral
-    mistral_client = (
-        Mistral(api_key=settings.MISTRAL_API_KEY)
-        if settings.MISTRAL_API_KEY else None
-    )
-except ImportError:
-    mistral_client = None
+mistral_client = (
+    AsyncOpenAI(api_key=settings.MISTRAL_API_KEY, base_url="https://api.mistral.ai/v1")
+    if settings.MISTRAL_API_KEY else None
+)
 
 SUPPORTED_MODELS = [
     "google/gemini-2.0-flash",
@@ -83,7 +79,7 @@ async def run_llm(model: str, prompt: str) -> dict:
         elif model.startswith("mistral/"):
             if not mistral_client:
                 return _error_result("Mistral API key not configured", start)
-            return await _run_mistral(model.replace("mistral/", ""), prompt, start)
+            return await _run_openai_compatible(mistral_client, model.replace("mistral/", ""), prompt, start)
         else:
             if not openrouter_client:
                 return _error_result("OpenRouter API key not configured", start)
@@ -140,26 +136,6 @@ async def _run_anthropic(model_name: str, prompt: str, start: float) -> dict:
     tokens = response.usage.input_tokens + response.usage.output_tokens if response.usage else None
     return {
         "output": response.content[0].text if response.content else None,
-        "latency_ms": latency,
-        "tokens_used": tokens,
-        "cost_usd": 0.0,
-        "error": None
-    }
-
-
-async def _run_mistral(model_name: str, prompt: str, start: float) -> dict:
-    if not mistral_client:
-        return _error_result("Mistral API key not configured", start)
-    
-    response = await asyncio.to_thread(
-        mistral_client.chat.complete,
-        model=model_name,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    latency = int((time.time() - start) * 1000)
-    tokens = response.usage.total_tokens if response.usage else None
-    return {
-        "output": response.choices[0].message.content,
         "latency_ms": latency,
         "tokens_used": tokens,
         "cost_usd": 0.0,
