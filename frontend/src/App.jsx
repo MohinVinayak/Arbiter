@@ -47,7 +47,8 @@ async function apiFetch(path, init = {}) {
     ...buildKeyHeaders(),
     ...(init.headers || {}),
   };
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const baseUrl = API_BASE.replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
   if (!response.ok) {
     const err = await response.json().catch(() => ({ detail: response.statusText }));
     throw new Error(err.detail || `HTTP ${response.status}`);
