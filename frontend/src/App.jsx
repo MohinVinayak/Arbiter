@@ -730,7 +730,7 @@ export default function App() {
                 {/* Security notice */}
                 <div className="floating-card stagger-anim" style={{ '--delay': '0s', padding: '18px 28px', marginBottom: '16px', border: '1px solid rgba(16,163,127,0.25)', background: 'rgba(16,163,127,0.06)' }}>
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-                    <span style={{ fontSize: '20px', flexShrink: 0 }}>🔒</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10A37F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '2px' }}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: '13px', color: '#10A37F', marginBottom: '4px' }}>BYOK — Bring Your Own Key</div>
                       <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
@@ -779,7 +779,7 @@ export default function App() {
                             onClick={() => setSettingsVisible(prev => ({ ...prev, [key]: !prev[key] }))}
                             title={settingsVisible[key] ? 'Hide' : 'Show'}
                           >
-                            {settingsVisible[key] ? '🙈' : '👁'}
+                            <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{settingsVisible[key] ? 'Hide' : 'Show'}</span>
                           </button>
                         </div>
                       </div>
@@ -809,13 +809,12 @@ export default function App() {
                   <div className="section-title" style={{ marginBottom: '12px' }}>How it works</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                     {[
-                      { icon: '🔑', title: 'Your keys stay yours', desc: 'Stored only in this browser. Clearing localStorage removes them instantly.' },
-                      { icon: '📡', title: 'Sent per request', desc: 'Attached as encrypted HTTPS headers on every eval — discarded immediately after.' },
-                      { icon: '🛡️', title: 'Zero server storage', desc: 'No database, no logs. A server breach cannot expose your API keys.' },
-                      { icon: '🔄', title: 'Server fallbacks', desc: 'Providers marked "server fallback ✓" work even without your own key.' },
-                    ].map(({ icon, title, desc }) => (
+                      { title: 'Your keys stay yours', desc: 'Stored only in this browser. Clearing localStorage removes them instantly.' },
+                      { title: 'Sent per request', desc: 'Attached as encrypted HTTPS headers on every eval — discarded immediately after.' },
+                      { title: 'Zero server storage', desc: 'No database, no logs. A server breach cannot expose your API keys.' },
+                      { title: 'Server fallbacks', desc: 'Providers marked "server fallback ✓" work even without your own key.' },
+                    ].map(({ title, desc }) => (
                       <div key={title} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px', border: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div style={{ fontSize: '22px', marginBottom: '8px' }}>{icon}</div>
                         <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px' }}>{title}</div>
                         <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>{desc}</div>
                       </div>
