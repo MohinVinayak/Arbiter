@@ -827,15 +827,15 @@ export default function App() {
           --border: #222222; 
           --text-main: #EDEDED; 
           --text-muted: #888888;
-          --pop-primary: #00E5FF; 
-          --pop-primary-dark: #008B99;
+          --pop-primary: #FFFFFF; 
+          --pop-primary-dark: #A3A3A3;
           --shadow-float: 0 12px 32px -8px rgba(0,0,0,0.8);
           --tooltip-bg: rgba(255,255,255,0.05); 
           --panel-bg: rgba(255,255,255,0.05);
-          --bg-glow-color: rgba(0, 229, 255, 0.12);
+          --bg-glow-color: rgba(255, 255, 255, 0.02);
           --inner-glow: inset 0 1px 1px rgba(255,255,255,0.05);
           --input-bg: #000000;
-          --shadow-hover: 0 30px 60px -15px rgba(0, 229, 255, 0.2); 
+          --shadow-hover: 0 30px 60px -15px rgba(255, 255, 255, 0.1); 
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease; }
