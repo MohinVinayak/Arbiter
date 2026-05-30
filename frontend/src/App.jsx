@@ -7,6 +7,9 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Cartes
 // ============================================================================
 // 1. API SERVICE LAYER & CONSTANTS
 // ============================================================================
+// In dev: empty string → Vite proxy forwards /api/* to localhost:8000
+// In prod: VITE_API_URL is set to the Railway backend URL (e.g. https://arbiter.up.railway.app)
+const API_BASE = import.meta.env.VITE_API_URL || "";
 const DYNAMIC_COLORS = [
   { color: "#FF5A26", bg: "rgba(255, 90, 38, 0.1)" }, 
   { color: "#10A37F", bg: "rgba(16, 163, 127, 0.1)" }, 
@@ -18,8 +21,23 @@ const DYNAMIC_COLORS = [
 
 function formatModelLabel(rawId) {
   const parts = rawId.split('/');
-  let name = parts[parts.length - 1].replace(/-/g, ' ');
-  name = name.replace('8b instant', '8B').replace('70b versatile', '70B').replace('exp free', '');
+  const provider = parts[0];
+  let name = parts[parts.length - 1];
+
+  // Provider-specific prettification
+  if (provider === 'google') {
+    // gemini-2.5-flash-lite → Gemini 2.5 Flash Lite
+    name = name.replace(/^gemini-/, 'Gemini ').replace(/-/g, ' ');
+    return name.replace(/\b\w/g, l => l.toUpperCase()).trim();
+  }
+
+  name = name.replace(/-/g, ' ');
+  // Groq size labels
+  name = name.replace(/\b8b\b/gi, '8B').replace(/\b70b\b/gi, '70B');
+  // Strip noise
+  name = name.replace(/\b(instant|versatile|exp free|latest)\b/gi, s =>
+    s === 'latest' ? '' : s
+  );
   return name.replace(/\b\w/g, l => l.toUpperCase()).trim();
 }
 
@@ -75,7 +93,7 @@ export default function App() {
 
   async function fetchRealBackendEval(suiteId, selectedModels, judgeId) {
     try {
-      const response = await fetch('/api/runs/evaluate', {
+      const response = await fetch(`${API_BASE}/api/runs/evaluate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suiteId: String(suiteId), models: selectedModels, judgeId })
@@ -92,7 +110,7 @@ export default function App() {
   useEffect(() => {
     async function fetchBackendModels() {
       try {
-        const response = await fetch('/api/models');
+        const response = await fetch(`${API_BASE}/api/models`);
         if (!response.ok) throw new Error("Failed to fetch models");
         
         const data = await response.json();
@@ -148,6 +166,46 @@ export default function App() {
   
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evalResults, setEvalResults] = useState(runHistory.length > 0 ? runHistory[0] : null);
+
+  // --- Settings State ---
+  const SETTINGS_FIELDS = [
+    { key: 'gemini_api_key',    label: 'Gemini API Key',     placeholder: 'AIza...' },
+    { key: 'openai_api_key',    label: 'OpenAI API Key',     placeholder: 'sk-...' },
+    { key: 'anthropic_api_key', label: 'Anthropic API Key',  placeholder: 'sk-ant-...' },
+    { key: 'groq_api_key',      label: 'Groq API Key',       placeholder: 'gsk_...' },
+    { key: 'openrouter_api_key',label: 'OpenRouter API Key', placeholder: 'sk-or-...' },
+    { key: 'github_token',      label: 'GitHub Token (OpenAI Proxy)', placeholder: 'ghp_...' },
+  ];
+  const [settingsData, setSettingsData] = useState({});
+  const [settingsVisible, setSettingsVisible] = useState({});
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsToast, setSettingsToast] = useState(null); // 'success' | 'error' | null
+
+  useEffect(() => {
+    if (page !== 'settings') return;
+    fetch(`${API_BASE}/api/settings`)
+      .then(r => r.json())
+      .then(data => setSettingsData(data))
+      .catch(() => {});
+  }, [page]);
+
+  const handleSaveSettings = async () => {
+    setSettingsSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settingsData),
+      });
+      if (!res.ok) throw new Error();
+      setSettingsToast('success');
+    } catch {
+      setSettingsToast('error');
+    } finally {
+      setSettingsSaving(false);
+      setTimeout(() => setSettingsToast(null), 3000);
+    }
+  };
 
   // ── High-Performance Single Cursor & Background ──
   const cursorRef = useRef(null);
@@ -218,7 +276,9 @@ export default function App() {
     try {
       // 1. Try to send to backend (Will use PUT if editing, POST if new)
       const method = editingSuiteId ? 'PUT' : 'POST';
-      const url = editingSuiteId ? `/api/suites/${editingSuiteId}` : '/api/suites';
+      const url = editingSuiteId
+        ? `${API_BASE}/api/suites/${editingSuiteId}`
+        : `${API_BASE}/api/suites`;
       
       const response = await fetch(url, {
         method: method,
@@ -323,6 +383,7 @@ export default function App() {
             <button onClick={() => { resetSuiteForm(); setPage("dashboard"); }} className={`nav-btn ${page === "dashboard" ? "active" : ""}`}><span className="nav-icon">◒</span>Dashboard</button>
             <button onClick={() => { resetSuiteForm(); setPage("new-suite"); }} className={`nav-btn ${page === "new-suite" ? "active" : ""}`}><span className="nav-icon">✚</span>Create Suite</button>
             <button onClick={() => setPage("results")} className={`nav-btn ${page === "results" ? "active" : ""}`}><span className="nav-icon">❖</span>Run Results</button>
+            <button onClick={() => setPage("settings")} className={`nav-btn ${page === "settings" ? "active" : ""}`}><span className="nav-icon">⚙</span>Settings</button>
           </div>
 
           <div className="models-section">
@@ -555,7 +616,18 @@ export default function App() {
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.6}/>
                             <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 12, fontWeight: 600 }} axisLine={false} tickLine={false} />
                             <YAxis domain={[0, 100]} tick={{ fill: 'var(--text-muted)', fontSize: 12 }} axisLine={false} tickLine={false} />
-                            <Tooltip cursor={{ fill: 'var(--tooltip-bg)' }} contentStyle={{ borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-surface)', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }} />
+                            <Tooltip
+                              cursor={{ fill: 'var(--tooltip-bg)' }}
+                              contentStyle={{
+                                borderRadius: '12px',
+                                border: '1px solid var(--border)',
+                                background: 'var(--bg-surface)',
+                                boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
+                                color: 'var(--text-main)',
+                              }}
+                              labelStyle={{ color: 'var(--text-main)', fontWeight: 700, marginBottom: '4px' }}
+                              itemStyle={{ color: 'var(--text-muted)' }}
+                            />
                             <Bar dataKey="score" radius={[8, 8, 0, 0]} maxBarSize={60}>
                               {evalResults.metrics.map((entry, index) => (
                                 <Cell key={`cell-${index}`} fill={entry.color} />
@@ -627,6 +699,82 @@ export default function App() {
                 )}
               </motion.div>
             )}
+
+            {/* SETTINGS PAGE */}
+            {page === "settings" && (
+              <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-800 mx-auto pb-12">
+                <header className="page-header">
+                  <h1 className="hero-title">
+                    <div className="mask-text"><span className="slide-up-1">API KEY</span></div>
+                    <div className="mask-text"><span className="slide-up-2">SETTINGS</span></div>
+                  </h1>
+                  <p className="hero-subtitle fade-in-delayed">Keys are stored in the database, not in .env — changes apply instantly.</p>
+                </header>
+
+                <div className="floating-card form-card stagger-anim" style={{ '--delay': '0.1s' }}>
+                  <div className="section-title" style={{ marginBottom: '28px' }}>Provider Credentials</div>
+
+                  {SETTINGS_FIELDS.map(({ key, label, placeholder }) => (
+                    <div className="input-group" key={key}>
+                      <label>{label}</label>
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          id={`settings-${key}`}
+                          className="inset-input"
+                          type={settingsVisible[key] ? 'text' : 'password'}
+                          value={settingsData[key] || ''}
+                          onChange={e => setSettingsData(prev => ({ ...prev, [key]: e.target.value }))}
+                          placeholder={placeholder}
+                          style={{ paddingRight: '52px' }}
+                          autoComplete="off"
+                        />
+                        <button
+                          className="settings-eye-btn"
+                          onClick={() => setSettingsVisible(prev => ({ ...prev, [key]: !prev[key] }))}
+                          title={settingsVisible[key] ? 'Hide' : 'Show'}
+                        >
+                          {settingsVisible[key] ? '🙈' : '👁'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="deploy-footer" style={{ marginTop: '32px', paddingBottom: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      {settingsToast === 'success' && (
+                        <motion.span
+                          initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
+                          style={{ color: '#10A37F', fontSize: '13px', fontWeight: 700 }}
+                        >✓ Saved successfully</motion.span>
+                      )}
+                      {settingsToast === 'error' && (
+                        <motion.span
+                          initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
+                          style={{ color: '#FF5A26', fontSize: '13px', fontWeight: 700 }}
+                        >✗ Save failed — is the backend running?</motion.span>
+                      )}
+                    </div>
+                    <MagneticButton
+                      className="btn-3d large scale-click"
+                      onClick={handleSaveSettings}
+                      style={{ opacity: settingsSaving ? 0.6 : 1 }}
+                    >
+                      {settingsSaving ? 'Saving…' : 'Save Keys'}
+                    </MagneticButton>
+                  </div>
+                </div>
+
+                <div className="floating-card stagger-anim" style={{ '--delay': '0.2s', padding: '28px 32px' }}>
+                  <div className="section-title" style={{ marginBottom: '12px' }}>How it works</div>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '14px', lineHeight: 1.7, margin: 0 }}>
+                    Keys saved here are written to the <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)', fontSize: '13px' }}>app_settings</span> table in Supabase.
+                    The backend reads them at eval-time, so you never need to edit <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)', fontSize: '13px' }}>.env</span> manually.
+                    Leaving a field empty means that provider's models won't appear in the model list.
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
           </AnimatePresence>
         </main>
       </div>
@@ -711,9 +859,13 @@ export default function App() {
         }
         @media (pointer: coarse) { .custom-shadow-cursor { display: none; } }
 
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+        
+        /* Invisible scroll — scrollable but no visible scrollbar taking up space */
+        .scroll-hidden { scrollbar-width: none; -ms-overflow-style: none; }
+        .scroll-hidden::-webkit-scrollbar { display: none; }
 
         .app-layout { display: flex; min-height: 100vh; padding: 24px; gap: 40px; max-width: 1600px; margin: 0 auto; position: relative; }
 
@@ -746,7 +898,7 @@ export default function App() {
         .section-title { font-size: 12px; font-weight: 800; letter-spacing: 0.15em; color: var(--text-muted); margin-bottom: 16px; text-transform: uppercase; }
         .card-title { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 8px; color: var(--text-main); }
 
-        .sidebar { width: 300px; min-width: 300px; height: calc(100vh - 48px); position: sticky; top: 24px; display: flex; flex-direction: column; padding: 32px 24px; z-index: 10; }
+        .sidebar { width: 300px; min-width: 300px; height: calc(100vh - 48px); position: sticky; top: 24px; display: flex; flex-direction: column; padding: 32px 24px; z-index: 10; overflow-y: auto; overflow-x: hidden; }
         .floating-panel { background: var(--panel-bg); backdrop-filter: blur(24px); border: 1px solid var(--border); border-radius: 28px; box-shadow: var(--shadow-float), var(--inner-glow); }
 
         .main-canvas { flex: 1; padding-top: 24px; display: flex; justify-content: center; }
@@ -826,8 +978,9 @@ export default function App() {
         .nav-btn.active { background: var(--bg-surface); color: var(--pop-primary); transform: translateX(6px); box-shadow: var(--shadow-float); border: 1px solid var(--border); }
 
         /* Models Stack */
-        .models-section { padding-top: 32px; border-top: 1px dashed var(--border); }
-        .models-stack { display: flex; flex-direction: column; gap: 8px; }
+        .models-section { padding-top: 32px; border-top: 1px dashed var(--border); flex-shrink: 1; min-height: 0; display: flex; flex-direction: column; }
+        .models-stack { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: 200px; scrollbar-width: none; -ms-overflow-style: none; }
+        .models-stack::-webkit-scrollbar { display: none; }
         .model-card { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 700; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); cursor: pointer; }
         .model-card .model-label { color: var(--text-muted); transition: color 0.3s ease; }
         .model-card:hover { background: var(--mbg); border-color: var(--mc); transform: translateY(-3px) scale(1.02); box-shadow: 0 8px 20px rgba(0,0,0,0.05); }
@@ -876,6 +1029,15 @@ export default function App() {
         .judge-menu-item:hover { background: rgba(255,255,255,0.05); color: var(--text-main); padding-left: 18px; }
         .judge-menu-item.active { background: rgba(255,255,255,0.1); color: var(--text-main); font-weight: 700; }
         .judge-indicator { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; transition: background 0.3s ease; }
+
+        /* Settings Eye Toggle */
+        .settings-eye-btn { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: transparent; border: none; font-size: 16px; line-height: 1; color: var(--text-muted); transition: opacity 0.2s ease; opacity: 0.6; padding: 4px; }
+        .settings-eye-btn:hover { opacity: 1; }
+
+        /* Misc */
+        .pb-12 { padding-bottom: 48px; }
+        .page-header { margin-bottom: 40px; }
+        .align-start { align-items: flex-start; }
       `}</style>
     </>
   );

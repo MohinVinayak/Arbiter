@@ -1,7 +1,9 @@
 from pydantic_settings import BaseSettings
 
+
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql://postgres:Jabagavaeashit@005@db.muwgrchqhxctfuhdxwys.supabase.co:5432/postgres"
+    # Default to SQLite so the app works with zero external setup
+    DATABASE_URL: str = "sqlite:///./evalforge.db"
     GEMINI_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
@@ -14,5 +16,6 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+
 
 settings = Settings()

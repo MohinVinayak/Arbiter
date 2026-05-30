@@ -117,7 +117,7 @@ SCORE: <number between 0.0 and 1.0>
 REASONING: <one sentence explanation>"""
 
 
-async def run_llm_judge(prompt: str, output: str, expected: str = None, judge_model: str = "google/gemini-2.0-flash") -> dict:
+async def run_llm_judge(prompt: str, output: str, expected: str = None, judge_model: str = "google/gemini-2.0-flash", db=None) -> dict:
     """
     Use an LLM to judge output quality.
     Returns: { score: float, reasoning: str }
@@ -137,7 +137,7 @@ async def run_llm_judge(prompt: str, output: str, expected: str = None, judge_mo
         "{expected_section}", expected_section
     )
 
-    result = await run_llm(judge_model, judge_input)
+    result = await run_llm(judge_model, judge_input, db=db)
 
     if result["error"]:
         return {"score": None, "reasoning": f"Judge failed: {result['error']}"}

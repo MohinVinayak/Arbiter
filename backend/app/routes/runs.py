@@ -1,40 +1,42 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from app.database import get_db
-from app.models.test_suite import TestSuite
-from app.models.run import Run, Result
-from app.services.llm_runner import run_parallel
-from app.services.evaluator import (
-    run_deterministic_checks,
-    compute_semantic_score,
-    run_llm_judge,
-    compute_overall_score
-)
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime, timezone
 import logging
-import uuid
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models.run import Result, Run
+from app.models.test_suite import TestSuite
+from app.services.evaluator import (
+    compute_overall_score,
+    compute_semantic_score,
+    run_deterministic_checks,
+    run_llm_judge,
+)
+from app.services.llm_runner import run_parallel
 
 router = APIRouter()
-
 logger = logging.getLogger("uvicorn.error")
 
+
+# ── Request Schemas ───────────────────────────────────────
 
 class RunCreate(BaseModel):
     suite_id: str
     models: list[str]
     judge_model: Optional[str] = "google/gemini-2.0-flash"
 
-# Shape the frontend sends to POST /api/evaluate
+
 class EvalRequest(BaseModel):
+    """Shape the frontend sends to POST /api/runs/evaluate."""
     suiteId: str
     models: list[str]
     judgeId: Optional[str] = "google/gemini-2.0-flash"
 
 
-# ── Pydantic Schemas ──────────────────────────────────────
-
+# ── Core Evaluation Pipeline ──────────────────────────────
 
 async def _run_eval(suite: TestSuite, models: list[str], judge_model: str, db: Session):
     """
@@ -46,28 +48,47 @@ async def _run_eval(suite: TestSuite, models: list[str], judge_model: str, db: S
     db.commit()
     db.refresh(run)
 
-    # Accumulate scores + latency per model across all test cases
-    accum = {m: {"scores": [], "latencies": [], "reasoning": "", "tokens": 0, "cost": 0.0, "outputs": []} for m in models}
+    # Accumulate per-model stats across all test cases
+    accum = {
+        m: {
+            "scores": [],
+            "latencies": [],
+            "reasoning": "",
+            "tokens": 0,
+            "cost": 0.0,
+            "outputs": [],
+        }
+        for m in models
+    }
 
     for test_case in suite.test_cases:
-        # Fill prompt template variables
+        # Render prompt template
         prompt = test_case.prompt_template
         if test_case.input_variables:
             for k, v in test_case.input_variables.items():
                 prompt = prompt.replace(f"{{{k}}}", str(v))
 
-        # All models in parallel for this test case
-        llm_outputs = await run_parallel(models, prompt)
+        # Call all models in parallel
+        llm_outputs = await run_parallel(models, prompt, db)
 
         for model, llm_result in llm_outputs.items():
             if isinstance(llm_result, Exception):
-                llm_result = {"output": None, "latency_ms": 0, "tokens_used": 0, "cost_usd": 0.0, "error": str(llm_result)}
+                llm_result = {
+                    "output": None,
+                    "latency_ms": 0,
+                    "tokens_used": 0,
+                    "cost_usd": 0.0,
+                    "error": str(llm_result),
+                }
 
             output = llm_result.get("output")
-            
+
             det = run_deterministic_checks(output, test_case.checks or [])
             sem = compute_semantic_score(output, test_case.expected_output)
-            judge = await run_llm_judge(prompt, output, test_case.expected_output, judge_model=judge_model)
+            judge = await run_llm_judge(
+                prompt, output, test_case.expected_output,
+                judge_model=judge_model, db=db,
+            )
             overall = compute_overall_score(det["score"], sem, judge["score"])
 
             db.add(Result(
@@ -84,7 +105,7 @@ async def _run_eval(suite: TestSuite, models: list[str], judge_model: str, db: S
                 overall_score=overall,
                 check_details=det["details"],
                 judge_reasoning=judge["reasoning"],
-                error=llm_result.get("error")
+                error=llm_result.get("error"),
             ))
 
             if overall is not None:
@@ -101,12 +122,20 @@ async def _run_eval(suite: TestSuite, models: list[str], judge_model: str, db: S
     run.completed_at = datetime.now(timezone.utc)
     db.commit()
 
-    # Build summary metrics (averaged across test cases) — matches frontend shape
+    # Build summary metrics (averaged across test cases)
     metrics = []
     for model in models:
         a = accum[model]
-        avg_score = round((sum(a["scores"]) / len(a["scores"])) * 100) if a["scores"] else 0
-        avg_latency = round(sum(a["latencies"]) / len(a["latencies"])) if a["latencies"] else 0
+        avg_score = (
+            round((sum(a["scores"]) / len(a["scores"])) * 100)
+            if a["scores"]
+            else 0
+        )
+        avg_latency = (
+            round(sum(a["latencies"]) / len(a["latencies"]))
+            if a["latencies"]
+            else 0
+        )
         metrics.append({
             "id": model,
             "score": avg_score,
@@ -122,45 +151,43 @@ async def _run_eval(suite: TestSuite, models: list[str], judge_model: str, db: S
 
 
 # ── Routes ────────────────────────────────────────────────
-# ── Core eval logic ───────────────────────────────────────
+
 @router.post("/evaluate")
 async def run_evaluate(request: EvalRequest, db: Session = Depends(get_db)):
-    """Called by the frontend. Runs eval and returns {metrics} synchronously."""
-    logger.info(f"🚀 Starting Eval Suite '{request.suiteId}' over {len(request.models)} models (Judge: {request.judgeId})")
-    
-    # Gracefully handle legacy numerical/timestamp IDs from frontend cache
-    try:
-        suite_uuid = uuid.UUID(request.suiteId)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Suite ID '{request.suiteId}' is not a valid UUID. Please ensure the suite is saved to the database first.")
-        
-    suite = db.query(TestSuite).filter(TestSuite.id == suite_uuid).first()
+    """Frontend entry-point. Runs eval synchronously and returns {metrics}."""
+    logger.info(
+        f"🚀 Starting eval on suite '{request.suiteId}' "
+        f"over {len(request.models)} model(s) (Judge: {request.judgeId})"
+    )
+
+    suite = db.query(TestSuite).filter(TestSuite.id == request.suiteId).first()
     if not suite:
-        raise HTTPException(status_code=404, detail=f"Suite '{request.suiteId}' not found. Make sure it was saved to DB first.")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Suite '{request.suiteId}' not found. Save it to the DB first.",
+        )
     if not suite.test_cases:
-        raise HTTPException(status_code=400, detail="This suite has no test cases. Add at least one before running.")
+        raise HTTPException(
+            status_code=400,
+            detail="This suite has no test cases. Add at least one before running.",
+        )
 
     _, metrics = await _run_eval(suite, request.models, request.judgeId, db)
-    logger.info(f"✅ Eval complete. Processed {len(metrics)} model metric summaries.")
+    logger.info(f"✅ Eval complete. {len(metrics)} model metric summaries ready.")
     return {"metrics": metrics}
 
 
 @router.post("/")
 async def create_run(data: RunCreate, db: Session = Depends(get_db)):
     """Programmatic API — same pipeline, returns run_id + metrics."""
-    try:
-        suite_uuid = uuid.UUID(data.suite_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Suite ID must be a valid UUID string.")
-        
-    suite = db.query(TestSuite).filter(TestSuite.id == suite_uuid).first()
+    suite = db.query(TestSuite).filter(TestSuite.id == data.suite_id).first()
     if not suite:
         raise HTTPException(status_code=404, detail="Suite not found")
     if not suite.test_cases:
         raise HTTPException(status_code=400, detail="Suite has no test cases.")
 
     run, metrics = await _run_eval(suite, data.models, data.judge_model, db)
-    return {"run_id": str(run.id), "status": run.status, "metrics": metrics}
+    return {"run_id": run.id, "status": run.status, "metrics": metrics}
 
 
 @router.get("/")
@@ -170,30 +197,31 @@ def list_all_runs(db: Session = Depends(get_db)):
     for r in runs:
         suite = db.query(TestSuite).filter(TestSuite.id == r.suite_id).first()
         result.append({
-            "id": str(r.id),
+            "id": r.id,
             "suite_name": suite.name if suite else "Unknown",
             "models": r.models,
             "status": r.status,
             "created_at": r.created_at,
-            "completed_at": r.completed_at
+            "completed_at": r.completed_at,
         })
     return result
 
 
 @router.get("/suite/{suite_id}")
 def get_runs_for_suite(suite_id: str, db: Session = Depends(get_db)):
-    try:
-        suite_uuid = uuid.UUID(suite_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="suite_id must be a valid UUID")
-    runs = db.query(Run).filter(Run.suite_id == suite_uuid).order_by(Run.created_at.desc()).all()
+    runs = (
+        db.query(Run)
+        .filter(Run.suite_id == suite_id)
+        .order_by(Run.created_at.desc())
+        .all()
+    )
     return [
         {
-            "id": str(r.id),
+            "id": r.id,
             "models": r.models,
             "status": r.status,
             "created_at": r.created_at,
-            "result_count": len(r.results)
+            "result_count": len(r.results),
         }
         for r in runs
     ]
@@ -201,26 +229,22 @@ def get_runs_for_suite(suite_id: str, db: Session = Depends(get_db)):
 
 @router.get("/{run_id}")
 def get_run(run_id: str, db: Session = Depends(get_db)):
-    try:
-        run_uuid = uuid.UUID(run_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="run_id must be a valid UUID")
-    run = db.query(Run).filter(Run.id == run_uuid).first()
+    run = db.query(Run).filter(Run.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    results = db.query(Result).filter(Result.run_id == run_uuid).all()
+    results = db.query(Result).filter(Result.run_id == run_id).all()
     return {
-        "id": str(run.id),
-        "suite_id": str(run.suite_id),
+        "id": run.id,
+        "suite_id": run.suite_id,
         "models": run.models,
         "status": run.status,
         "created_at": run.created_at,
         "completed_at": run.completed_at,
         "results": [
             {
-                "id": str(r.id),
-                "test_case_id": str(r.test_case_id),
+                "id": r.id,
+                "test_case_id": r.test_case_id,
                 "model": r.model,
                 "output": r.output,
                 "latency_ms": r.latency_ms,
@@ -234,8 +258,8 @@ def get_run(run_id: str, db: Session = Depends(get_db)):
                 },
                 "check_details": r.check_details,
                 "judge_reasoning": r.judge_reasoning,
-                "error": r.error
+                "error": r.error,
             }
             for r in results
-        ]
+        ],
     }

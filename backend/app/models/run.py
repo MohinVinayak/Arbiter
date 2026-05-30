@@ -1,18 +1,18 @@
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON, Float, Integer
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 import uuid
 
+
 class Run(Base):
-    """A single execution of a test suite against one or more models"""
+    """A single execution of a test suite against one or more models."""
     __tablename__ = "runs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    suite_id = Column(UUID(as_uuid=True), ForeignKey("test_suites.id"), nullable=False)
-    models = Column(JSON, nullable=False)      # e.g. ["gemini", "gpt-4"]
-    status = Column(String, default="pending") # pending | running | completed | failed
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    suite_id = Column(String, ForeignKey("test_suites.id"), nullable=False)
+    models = Column(JSON, nullable=False)       # e.g. ["google/gemini-2.0-flash", "groq/llama-3.3-70b-versatile"]
+    status = Column(String, default="pending")  # pending | running | completed | failed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -21,14 +21,14 @@ class Run(Base):
 
 
 class Result(Base):
-    """Output + scores for one test case × one model"""
+    """Output + scores for one test case × one model."""
     __tablename__ = "results"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    run_id = Column(UUID(as_uuid=True), ForeignKey("runs.id"), nullable=False)
-    test_case_id = Column(UUID(as_uuid=True), ForeignKey("test_cases.id"), nullable=False)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    run_id = Column(String, ForeignKey("runs.id"), nullable=False)
+    test_case_id = Column(String, ForeignKey("test_cases.id"), nullable=False)
 
-    model = Column(String, nullable=False)           # e.g. "gemini-pro"
+    model = Column(String, nullable=False)           # e.g. "google/gemini-2.0-flash"
     output = Column(Text, nullable=True)             # Raw LLM response
     latency_ms = Column(Integer, nullable=True)      # How long it took
     tokens_used = Column(Integer, nullable=True)     # Token count
@@ -40,7 +40,7 @@ class Result(Base):
     judge_score = Column(Float, nullable=True)           # LLM-as-judge (0-1)
     overall_score = Column(Float, nullable=True)         # Weighted average
 
-    check_details = Column(JSON, nullable=True)  # Per-check pass/fail breakdown
+    check_details = Column(JSON, nullable=True)   # Per-check pass/fail breakdown
     judge_reasoning = Column(Text, nullable=True) # Why the judge gave this score
     error = Column(Text, nullable=True)           # If the LLM call failed
 

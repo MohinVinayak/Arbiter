@@ -2,81 +2,79 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Response
+from fastapi import Depends, FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
-# Internal imports based on your project structure
-from app.database import engine, Base
-from app.routes import suites, runs, settings
-from app.models.settings import AppSettings  # ensures app_settings table registers with Base
+from app.database import Base, engine, get_db
+from app.models.settings import AppSettings   # registers table with Base
+from app.models.test_suite import TestSuite, TestCase  # noqa: F401 – ensures tables created
+from app.models.run import Run, Result         # noqa: F401 – ensures tables created
+from app.routes import runs, settings, suites
+from app.utils.keys import get_available_models, get_resolved_keys
 
-# 1. ROBUST ENVIRONMENT LOADING
-# We resolve the absolute path to ensure .env is found even if you run from a subfolder
-env_path = Path(__file__).resolve().parent.parent / '.env'
-load_dotenv(dotenv_path=env_path)
+# ── Environment ────────────────────────────────────────────────────────────────
+env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
 
-print("\n--- Arbiter Startup: API Key Status ---")
-keys = ["GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "MISTRAL_API_KEY"]
-for key in keys:
+print("\n--- Arbiter Startup: .env Key Status ---")
+_ENV_KEYS = [
+    "GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "MISTRAL_API_KEY",
+    "OPENROUTER_API_KEY",
+]
+for key in _ENV_KEYS:
     status = "[OK]" if os.getenv(key) else "[MISSING]"
-    print(f"{key:20}: {status}")
+    print(f"  {key:24}: {status}")
+print(f"  DATABASE_URL            : {os.getenv('DATABASE_URL', '(default SQLite)')[:40]}")
+print("  NOTE: DB keys (via Settings UI) override .env at request-time.")
 print("------------------------------------------\n")
 
-# 2. DATABASE INITIALIZATION
+# ── Database initialisation ────────────────────────────────────────────────────
 Base.metadata.create_all(bind=engine)
 
+# ── App ────────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Arbiter API",
     description="Professional LLM Evaluation & Telemetry Backend",
-    version="2.0.0"
+    version="2.1.0",
 )
 
-# 3. CORS CONFIGURATION (Vite Default)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",   # Vite fallback port
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 4. ATTACH ROUTERS
+# ── Routers ────────────────────────────────────────────────────────────────────
 app.include_router(suites.router, prefix="/api/suites", tags=["Test Suites"])
-app.include_router(runs.router, prefix="/api/runs", tags=["Runs"])
+app.include_router(runs.router,   prefix="/api/runs",   tags=["Runs"])
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 
-# =============================================================================
-# ENDPOINT: MODEL DISCOVERY
-# =============================================================================
+
+# ── Model discovery ────────────────────────────────────────────────────────────
 @app.get("/api/models")
-def get_available_models():
-    """Returns only the models that have configured API keys."""
-    available_models = []
-    if os.getenv("GROQ_API_KEY"):
-        available_models.extend(["groq/llama-3.1-8b-instant", "groq/llama-3.3-70b-versatile"])
-    if os.getenv("GEMINI_API_KEY"):
-        available_models.append("google/gemini-2.0-flash")
-    if os.getenv("ANTHROPIC_API_KEY"):
-        available_models.append("anthropic/claude-3-haiku-20240307")
-    if os.getenv("OPENAI_API_KEY") or os.getenv("GITHUB_TOKEN"):
-        available_models.append("github/gpt-4o-mini")
-    if os.getenv("DEEPSEEK_API_KEY"):
-        available_models.extend(["deepseek/deepseek-chat", "deepseek/deepseek-reasoner"])
-    if os.getenv("MISTRAL_API_KEY"):
-        available_models.extend(["mistral/mistral-large-latest", "mistral/mistral-small-latest"])
-    
-    # Inject Custom Models from .env
-    custom_models = os.getenv("CUSTOM_MODELS")
-    if custom_models:
-        for m in custom_models.split(","):
-            m = m.strip()
-            if m and m not in available_models:
-                available_models.append(m)
-    
-    # Fallback to mocks so the UI remains interactive during local dev
-    if not available_models:
-        available_models = ["mock/alpha-test", "mock/beta-test"]
-    return {"models": available_models}
+def list_available_models(db: Session = Depends(get_db)):
+    """
+    Returns models whose provider API key is configured.
+    Priority: DB row (app_settings) → .env fallback.
+    """
+    resolved = get_resolved_keys(db)
+    return {"models": get_available_models(resolved)}
+
+
+@app.get("/api/health")
+def health():
+    """Simple liveness probe."""
+    return {"status": "ok"}
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
