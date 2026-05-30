@@ -393,7 +393,7 @@ export default function App() {
     <>
       <div className="ambient-background">
         <div ref={bgGlowRef} className="cursor-ambient-glow">
-          <div className="glow-orb artsy"></div>
+          <div className="glow-orb"></div>
         </div>
         <div className="dot-grid-overlay"></div>
       </div>
