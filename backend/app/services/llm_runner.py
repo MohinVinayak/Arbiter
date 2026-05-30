@@ -18,6 +18,7 @@ def _make_clients(resolved: dict) -> dict:
         "gemini":    genai.Client(api_key=resolved["gemini_api_key"]) if resolved.get("gemini_api_key") else None,
         "groq":      _oa(resolved.get("groq_api_key"),      "https://api.groq.com/openai/v1"),
         "github":    _oa(resolved.get("github_token"),       "https://models.inference.ai.azure.com"),
+        "openai":    _oa(resolved.get("openai_api_key"),     "https://api.openai.com/v1"),
         "anthropic": anthropic.AsyncAnthropic(api_key=resolved["anthropic_api_key"]) if resolved.get("anthropic_api_key") else None,
         "deepseek":  _oa(resolved.get("deepseek_api_key"),   "https://api.deepseek.com/v1"),
         "mistral":   _oa(resolved.get("mistral_api_key"),    "https://api.mistral.ai/v1"),
@@ -49,6 +50,9 @@ async def run_llm(model: str, prompt: str, resolved: dict = None) -> dict:
         elif model.startswith("mistral/"):
             if not clients["mistral"]: return _error("Mistral key not configured", start)
             return await _run_oa(clients["mistral"], model.replace("mistral/", ""), prompt, start)
+        elif model.startswith("openai/"):
+            if not clients["openai"]: return _error("OpenAI key not configured", start)
+            return await _run_oa(clients["openai"], model.replace("openai/", ""), prompt, start)
         else:
             if not clients["openrouter"]: return _error("OpenRouter key not configured", start)
             return await _run_oa(clients["openrouter"], model, prompt, start)
