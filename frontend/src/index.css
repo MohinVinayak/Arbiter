@@ -81,9 +81,9 @@ body {
 }
 
 .glow-orb.artsy {
-  background: radial-gradient(circle at 30% 30%, rgba(138, 43, 226, 0.4) 0%, transparent 60%),
-              radial-gradient(circle at 70% 70%, rgba(161, 193, 129, 0.4) 0%, transparent 60%), /* Matcha Green */
-              radial-gradient(circle at 50% 50%, rgba(255, 0, 128, 0.3) 0%, transparent 70%);
+  background: radial-gradient(circle at 30% 30%, rgba(138, 43, 226, 0.8) 0%, transparent 60%),
+              radial-gradient(circle at 70% 70%, rgba(161, 193, 129, 0.8) 0%, transparent 60%), /* Matcha Green */
+              radial-gradient(circle at 50% 50%, rgba(255, 0, 128, 0.7) 0%, transparent 70%);
   animation: artsyPulse 8s infinite alternate ease-in-out;
 }
 
