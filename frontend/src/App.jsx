@@ -307,9 +307,22 @@ export default function App() {
     };
 
     try {
-      const method = editingSuiteId ? 'PUT' : 'POST';
-      const path = editingSuiteId ? `/api/suites/${editingSuiteId}` : '/api/suites';
-      const savedSuite = await apiFetch(path, { method, body: JSON.stringify(suiteData) });
+      let method = editingSuiteId ? 'PUT' : 'POST';
+      let path = editingSuiteId ? `/api/suites/${editingSuiteId}` : '/api/suites';
+      let savedSuite;
+      
+      try {
+        savedSuite = await apiFetch(path, { method, body: JSON.stringify(suiteData) });
+      } catch (initialErr) {
+        if (editingSuiteId && String(initialErr).includes("404")) {
+          // If the backend 404s on a PUT, the suite was a local phantom. Try recreating it via POST.
+          method = 'POST';
+          path = '/api/suites';
+          savedSuite = await apiFetch(path, { method, body: JSON.stringify(suiteData) });
+        } else {
+          throw initialErr;
+        }
+      }
 
       if (editingSuiteId) {
         setSuites(suites.map(s => s.id === editingSuiteId ? savedSuite : s));
