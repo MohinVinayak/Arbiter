@@ -1047,7 +1047,7 @@ export default function App() {
         .judge-select-btn:hover { background: var(--input-bg); border-color: var(--pop-primary); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
         .chevron-icon { font-size: 10px; color: var(--text-muted); transition: transform 0.3s ease; }
         
-        .judge-dropdown-menu { position: absolute; bottom: calc(100% + 12px); left: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 8px; background: var(--panel-bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 -10px 40px rgba(0,0,0,0.2), inset 0 1px 1px rgba(255,255,255,0.05); z-index: 50; max-height: 280px; overflow-y: auto; transform-origin: bottom center; }
+        .judge-dropdown-menu { position: absolute; bottom: calc(100% + 12px); left: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 8px; background: #181818; border: 1px solid #333333; border-radius: 16px; box-shadow: 0 -10px 40px rgba(0,0,0,0.8), inset 0 1px 1px rgba(255,255,255,0.08); z-index: 100; max-height: 280px; overflow-y: auto; transform-origin: bottom center; }
         
         .judge-menu-item { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: transparent; border: none; border-radius: 10px; color: var(--text-muted); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; text-align: left; width: 100%; }
         .judge-menu-item:hover { background: rgba(255,255,255,0.05); color: var(--text-main); padding-left: 18px; }

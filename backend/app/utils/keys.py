@@ -14,6 +14,7 @@ MODEL_CATALOGUE = {
     "groq":      ("groq_api_key",       ["groq/llama-3.3-70b-versatile", "groq/llama-3.1-8b-instant"]),
     "anthropic": ("anthropic_api_key",  ["anthropic/claude-3-haiku-20240307"]),
     "github":    ("github_token",       ["github/gpt-4o-mini"]),
+    "openai":    ("openai_api_key",     ["openai/gpt-4o", "openai/gpt-4o-mini", "openai/o1-mini", "openai/o3-mini"]),
     "openrouter":("openrouter_api_key", []),   # populated via CUSTOM_MODELS
     "deepseek":  ("deepseek_api_key",   ["deepseek/deepseek-chat", "deepseek/deepseek-reasoner"]),
     "mistral":   ("mistral_api_key",    ["mistral/mistral-large-latest", "mistral/mistral-small-latest"]),
