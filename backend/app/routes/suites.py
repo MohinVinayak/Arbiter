@@ -26,6 +26,7 @@ class SuiteCreate(BaseModel):
 
 # ── Routes ────────────────────────────────────────────────
 
+@router.post("")
 @router.post("/")
 def create_suite(data: SuiteCreate, db: Session = Depends(get_db)):
     suite = TestSuite(name=data.name, description=data.description)
@@ -49,6 +50,7 @@ def create_suite(data: SuiteCreate, db: Session = Depends(get_db)):
     return _suite_detail(suite)
 
 
+@router.get("")
 @router.get("/")
 def list_suites(db: Session = Depends(get_db)):
     suites = db.query(TestSuite).all()
