@@ -194,6 +194,7 @@ export default function App() {
   const [testCases, setTestCases] = useState([{ prompt_template: "", expected_output: "" }]);
   
   const [isEvaluating, setIsEvaluating] = useState(false);
+  const [artsyGlow, setArtsyGlow] = useState(false);
   const [evalResults, setEvalResults] = useState(runHistory.length > 0 ? runHistory[0] : null);
 
   // --- Settings State (BYOK — keys stored in localStorage only, never the server) ---
@@ -391,8 +392,16 @@ export default function App() {
 
   return (
     <>
+      <button className="theme-toggle-text" onClick={() => setArtsyGlow(!artsyGlow)}>
+        <span className={!artsyGlow ? "active-theme" : ""}>MINIMAL</span>
+        <span>/</span>
+        <span className={artsyGlow ? "active-theme" : ""}>ARTSY</span>
+      </button>
+
       <div className="ambient-background">
-        <div ref={bgGlowRef} className="cursor-ambient-glow"><div className="glow-orb"></div></div>
+        <div ref={bgGlowRef} className="cursor-ambient-glow">
+          <div className={`glow-orb ${artsyGlow ? 'artsy' : ''}`}></div>
+        </div>
         <div className="dot-grid-overlay"></div>
       </div>
 
