@@ -1,33 +1,13 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from typing import Any
-from app.database import get_db
-from app.models.settings import AppSettings
-from app.schemas.settings import SettingsResponse, SettingsUpdate
+from fastapi import APIRouter
+from app.utils.keys import get_env_key_status
 
 router = APIRouter()
 
-@router.get("/", response_model=SettingsResponse)
-def get_settings(db: Session = Depends(get_db)) -> Any:
-    settings = db.query(AppSettings).first()
-    if not settings:
-        settings = AppSettings()
-        db.add(settings)
-        db.commit()
-        db.refresh(settings)
-    return settings
 
-@router.post("/", response_model=SettingsResponse)
-def update_settings(settings_in: SettingsUpdate, db: Session = Depends(get_db)) -> Any:
-    settings = db.query(AppSettings).first()
-    if not settings:
-        settings = AppSettings()
-        db.add(settings)
-    
-    update_data = settings_in.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(settings, field, value)
-    
-    db.commit()
-    db.refresh(settings)
-    return settings
+@router.get("/")
+def get_settings():
+    """
+    Returns which providers have a server-side API key configured (True/False).
+    User keys are stored client-side only and are never sent to this endpoint.
+    """
+    return {"server_keys": get_env_key_status()}

@@ -1,12 +1,9 @@
 import os
-from app.models.settings import AppSettings
 from sqlalchemy.orm import Session
 
-
 # ---------------------------------------------------------------------------
-# The canonical model catalogue.
-# Maps provider prefix → list of (model_id, required_key_attr_on_AppSettings)
-# Add new providers/models here only — nothing else needs to change.
+# Canonical model catalogue
+# Maps provider prefix → (settings_attr, [model_ids])
 # ---------------------------------------------------------------------------
 MODEL_CATALOGUE = {
     "google":    ("gemini_api_key",     [
@@ -22,7 +19,7 @@ MODEL_CATALOGUE = {
     "mistral":   ("mistral_api_key",    ["mistral/mistral-large-latest", "mistral/mistral-small-latest"]),
 }
 
-# Env-var name for each settings attr (used as fallback)
+# Env-var name for each key attribute
 _ATTR_TO_ENV = {
     "gemini_api_key":     "GEMINI_API_KEY",
     "openai_api_key":     "OPENAI_API_KEY",
@@ -34,49 +31,55 @@ _ATTR_TO_ENV = {
     "mistral_api_key":    "MISTRAL_API_KEY",
 }
 
+# HTTP header name → key attribute  (sent by the frontend per-request)
+_HEADER_TO_ATTR = {
+    "x-gemini-key":     "gemini_api_key",
+    "x-groq-key":       "groq_api_key",
+    "x-openai-key":     "openai_api_key",
+    "x-anthropic-key":  "anthropic_api_key",
+    "x-openrouter-key": "openrouter_api_key",
+    "x-github-token":   "github_token",
+    "x-deepseek-key":   "deepseek_api_key",
+    "x-mistral-key":    "mistral_api_key",
+}
 
-def resolve_key(db_value: str | None, env_var: str) -> str:
-    """
-    DB wins if non-empty, otherwise fall back to the matching .env value.
-    This is the single place where priority is defined.
-    """
-    if db_value and db_value.strip():
-        return db_value.strip()
-    return os.getenv(env_var, "")
 
-
-def get_resolved_keys(db: Session) -> dict[str, str]:
+def get_resolved_keys(request=None, db: Session = None) -> dict[str, str]:
     """
-    Return a dict of {attr_name: resolved_key} for every provider attr.
-    Reads the single app_settings row (auto-creates if missing).
-    """
-    row = db.query(AppSettings).first()
-    if not row:
-        row = AppSettings()
-        db.add(row)
-        db.commit()
-        db.refresh(row)
+    Return {attr: key_value} for every provider, in priority order:
 
-    return {
-        attr: resolve_key(getattr(row, attr, None), env_var)
+      1. Request headers (user's own key, sent from localStorage)   ← highest
+      2. Server .env vars (admin/demo fallback)                     ← lowest
+
+    Keys are NEVER stored in the database — this is intentional.
+    The DB parameter is kept for signature compatibility but unused.
+    """
+    # Start from server env vars
+    resolved = {
+        attr: os.getenv(env_var, "").strip()
         for attr, env_var in _ATTR_TO_ENV.items()
     }
 
+    # Override with any per-request headers the user supplied
+    if request is not None:
+        for header, attr in _HEADER_TO_ATTR.items():
+            val = request.headers.get(header, "").strip()
+            if val:
+                resolved[attr] = val
+
+    return resolved
+
 
 def get_available_models(resolved: dict[str, str]) -> list[str]:
-    """
-    Given a resolved-keys dict, return only the models whose provider key
-    is non-empty.  Also appends CUSTOM_MODELS from the environment.
-    """
+    """Return models whose provider key is present in `resolved`."""
     models: list[str] = []
 
     for _prefix, (attr, model_list) in MODEL_CATALOGUE.items():
         if resolved.get(attr):
             models.extend(model_list)
 
-    # Custom models injected via env (e.g. openrouter extras)
-    custom = os.getenv("CUSTOM_MODELS", "")
-    for m in custom.split(","):
+    # Extra models injected via CUSTOM_MODELS env var
+    for m in os.getenv("CUSTOM_MODELS", "").split(","):
         m = m.strip()
         if m and m not in models:
             models.append(m)
@@ -85,3 +88,14 @@ def get_available_models(resolved: dict[str, str]) -> list[str]:
         models = ["mock/alpha-test", "mock/beta-test"]
 
     return models
+
+
+def get_env_key_status() -> dict[str, bool]:
+    """
+    Returns which providers have a server-side env var key configured.
+    Sent to the frontend so users know which providers work without their own key.
+    """
+    return {
+        attr: bool(os.getenv(env_var, "").strip())
+        for attr, env_var in _ATTR_TO_ENV.items()
+    }

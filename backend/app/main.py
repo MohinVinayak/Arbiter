@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -61,12 +61,12 @@ app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 
 # ── Model discovery ────────────────────────────────────────────────────────────
 @app.get("/api/models")
-def list_available_models(db: Session = Depends(get_db)):
+def list_available_models(request: Request, db: Session = Depends(get_db)):
     """
-    Returns models whose provider API key is configured.
-    Priority: DB row (app_settings) → .env fallback.
+    Returns models whose provider key is available.
+    Priority: user request headers > server .env vars.
     """
-    resolved = get_resolved_keys(db)
+    resolved = get_resolved_keys(request=request)
     return {"models": get_available_models(resolved)}
 
 

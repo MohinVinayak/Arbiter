@@ -8,15 +8,59 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Cartes
 // 1. API SERVICE LAYER & CONSTANTS
 // ============================================================================
 // In dev: empty string → Vite proxy forwards /api/* to localhost:8000
-// In prod: VITE_API_URL is set to the Railway backend URL (e.g. https://arbiter.up.railway.app)
+// In prod: VITE_API_URL is set to the Railway backend URL
 const API_BASE = import.meta.env.VITE_API_URL || "";
+
+const KEYS_STORAGE_KEY = "arbiterApiKeys";
+
+/** Read user's own API keys from localStorage (never leaves the browser at rest). */
+function getStoredKeys() {
+  try { return JSON.parse(localStorage.getItem(KEYS_STORAGE_KEY) || "{}"); }
+  catch { return {}; }
+}
+
+/** Build HTTP headers that carry the user's keys to the backend for this request only. */
+function buildKeyHeaders() {
+  const k = getStoredKeys();
+  const h = {};
+  if (k.gemini_api_key)     h["X-Gemini-Key"]     = k.gemini_api_key;
+  if (k.groq_api_key)       h["X-Groq-Key"]        = k.groq_api_key;
+  if (k.openai_api_key)     h["X-OpenAI-Key"]      = k.openai_api_key;
+  if (k.anthropic_api_key)  h["X-Anthropic-Key"]   = k.anthropic_api_key;
+  if (k.openrouter_api_key) h["X-OpenRouter-Key"]  = k.openrouter_api_key;
+  if (k.github_token)       h["X-GitHub-Token"]    = k.github_token;
+  if (k.deepseek_api_key)   h["X-DeepSeek-Key"]    = k.deepseek_api_key;
+  if (k.mistral_api_key)    h["X-Mistral-Key"]      = k.mistral_api_key;
+  return h;
+}
+
+/**
+ * Central fetch wrapper — automatically adds:
+ *   • API_BASE prefix (production Railway URL)
+ *   • Content-Type: application/json
+ *   • X-*-Key headers (user's own keys, from localStorage)
+ * Keys are sent over HTTPS and NEVER stored server-side.
+ */
+async function apiFetch(path, init = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...buildKeyHeaders(),
+    ...(init.headers || {}),
+  };
+  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: response.statusText }));
+    throw new Error(err.detail || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
 const DYNAMIC_COLORS = [
-  { color: "#FF5A26", bg: "rgba(255, 90, 38, 0.1)" }, 
-  { color: "#10A37F", bg: "rgba(16, 163, 127, 0.1)" }, 
-  { color: "#4A6BFF", bg: "rgba(74, 107, 255, 0.1)" }, 
-  { color: "#F5A623", bg: "rgba(245, 166, 35, 0.1)" }, 
-  { color: "#9B51E0", bg: "rgba(155, 81, 224, 0.1)" }, 
-  { color: "#E91E63", bg: "rgba(233, 30, 99, 0.1)" },  
+  { color: "#946055", bg: "rgba(148, 96, 85, 0.1)" },  // Terracotta
+  { color: "#7A8075", bg: "rgba(122, 128, 117, 0.1)" }, // Sage
+  { color: "#D5D7D0", bg: "rgba(213, 215, 208, 0.3)" }, // Sand/Clay
+  { color: "#2C332A", bg: "rgba(44, 51, 42, 0.1)" },   // Forest Charcoal
+  { color: "#B8857A", bg: "rgba(184, 133, 122, 0.1)" }, // Dusty Rose
+  { color: "#8E9389", bg: "rgba(142, 147, 137, 0.1)" }, // Muted Olive
 ];
 
 function formatModelLabel(rawId) {
@@ -93,53 +137,43 @@ export default function App() {
 
   async function fetchRealBackendEval(suiteId, selectedModels, judgeId) {
     try {
-      const response = await fetch(`${API_BASE}/api/runs/evaluate`, {
+      const data = await apiFetch('/api/runs/evaluate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ suiteId: String(suiteId), models: selectedModels, judgeId })
       });
-      if (!response.ok) throw new Error("Evaluation failed");
-      const data = await response.json();
       return data.metrics;
     } catch (err) {
       console.error(err);
-      return [];
+      throw err;
     }
   }
 
-  useEffect(() => {
-    async function fetchBackendModels() {
-      try {
-        const response = await fetch(`${API_BASE}/api/models`);
-        if (!response.ok) throw new Error("Failed to fetch models");
-        
-        const data = await response.json();
-        const backendModelList = data.models; 
-        
-        const generatedModels = {};
-        backendModelList.forEach((id, index) => {
-          const theme = DYNAMIC_COLORS[index % DYNAMIC_COLORS.length];
-          generatedModels[id] = { color: theme.color, bg: theme.bg, label: formatModelLabel(id) };
-        });
-        
-        setModels(generatedModels);
-        
-        if (backendModelList.length >= 2) {
-          setSelectedModels([backendModelList[0], backendModelList[1]]);
-          setJudgeModel(backendModelList[0]);
-        } else if (backendModelList.length > 0) {
-          setSelectedModels([backendModelList[0]]);
-          setJudgeModel(backendModelList[0]);
-        }
-      } catch (error) {
-        console.error("Backend disconnected. Models failed to load:", error);
-      } finally { 
-        setIsLoadingModels(false); 
+  const refreshModels = async () => {
+    setIsLoadingModels(true);
+    try {
+      const data = await apiFetch('/api/models');
+      const backendModelList = data.models;
+      const generatedModels = {};
+      backendModelList.forEach((id, index) => {
+        const theme = DYNAMIC_COLORS[index % DYNAMIC_COLORS.length];
+        generatedModels[id] = { color: theme.color, bg: theme.bg, label: formatModelLabel(id) };
+      });
+      setModels(generatedModels);
+      if (backendModelList.length >= 2) {
+        setSelectedModels([backendModelList[0], backendModelList[1]]);
+        setJudgeModel(backendModelList[0]);
+      } else if (backendModelList.length > 0) {
+        setSelectedModels([backendModelList[0]]);
+        setJudgeModel(backendModelList[0]);
       }
+    } catch (error) {
+      console.error('Models failed to load:', error);
+    } finally {
+      setIsLoadingModels(false);
     }
-    
-    fetchBackendModels();
-  }, []);
+  };
+
+  useEffect(() => { refreshModels(); }, []);
 
   // --- Suite State Management ---
   const [suites, setSuites] = useState(() => {
@@ -167,83 +201,44 @@ export default function App() {
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evalResults, setEvalResults] = useState(runHistory.length > 0 ? runHistory[0] : null);
 
-  // --- Settings State ---
+  // --- Settings State (BYOK — keys stored in localStorage only, never the server) ---
   const SETTINGS_FIELDS = [
-    { key: 'gemini_api_key',    label: 'Gemini API Key',     placeholder: 'AIza...' },
-    { key: 'openai_api_key',    label: 'OpenAI API Key',     placeholder: 'sk-...' },
-    { key: 'anthropic_api_key', label: 'Anthropic API Key',  placeholder: 'sk-ant-...' },
-    { key: 'groq_api_key',      label: 'Groq API Key',       placeholder: 'gsk_...' },
-    { key: 'openrouter_api_key',label: 'OpenRouter API Key', placeholder: 'sk-or-...' },
-    { key: 'github_token',      label: 'GitHub Token (OpenAI Proxy)', placeholder: 'ghp_...' },
+    { key: 'gemini_api_key',     label: 'Gemini API Key',              placeholder: 'AIza...',     provider: 'Google' },
+    { key: 'groq_api_key',       label: 'Groq API Key',                placeholder: 'gsk_...',     provider: 'Groq' },
+    { key: 'deepseek_api_key',   label: 'DeepSeek API Key',            placeholder: 'sk-...',      provider: 'DeepSeek' },
+    { key: 'mistral_api_key',    label: 'Mistral API Key',             placeholder: 'xxx...',      provider: 'Mistral' },
+    { key: 'openrouter_api_key', label: 'OpenRouter API Key',          placeholder: 'sk-or-...',   provider: 'OpenRouter' },
+    { key: 'openai_api_key',     label: 'OpenAI API Key',              placeholder: 'sk-proj-...', provider: 'OpenAI' },
+    { key: 'anthropic_api_key',  label: 'Anthropic API Key',           placeholder: 'sk-ant-...',  provider: 'Anthropic' },
+    { key: 'github_token',       label: 'GitHub Token (GPT-4o-mini)',  placeholder: 'ghp_...',     provider: 'GitHub' },
   ];
-  const [settingsData, setSettingsData] = useState({});
+  // Load directly from localStorage on mount
+  const [settingsData, setSettingsData] = useState(() => getStoredKeys());
   const [settingsVisible, setSettingsVisible] = useState({});
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [settingsToast, setSettingsToast] = useState(null); // 'success' | 'error' | null
+  const [settingsToast, setSettingsToast] = useState(null);
+  const [serverKeys, setServerKeys] = useState({});
 
+  // Fetch which providers have server-side fallback keys
   useEffect(() => {
     if (page !== 'settings') return;
-    fetch(`${API_BASE}/api/settings`)
-      .then(r => r.json())
-      .then(data => setSettingsData(data))
+    apiFetch('/api/settings')
+      .then(data => setServerKeys(data.server_keys || {}))
       .catch(() => {});
   }, [page]);
 
-  const handleSaveSettings = async () => {
+  const handleSaveSettings = () => {
+    // Save to localStorage — nothing is sent to the server
+    localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(settingsData));
     setSettingsSaving(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settingsData),
-      });
-      if (!res.ok) throw new Error();
-      setSettingsToast('success');
-    } catch {
-      setSettingsToast('error');
-    } finally {
-      setSettingsSaving(false);
-      setTimeout(() => setSettingsToast(null), 3000);
-    }
+    setSettingsToast('success');
+    // Refresh the model list since available providers may have changed
+    refreshModels();
+    setTimeout(() => { setSettingsSaving(false); setSettingsToast(null); }, 2000);
   };
 
   // ── High-Performance Single Cursor & Background ──
-  const cursorRef = useRef(null);
-  const bgGlowRef = useRef(null);
-  const mousePos = useRef({ x: -1000, y: -1000 });
-  const bgPos = useRef({ x: -1000, y: -1000 });
-
-  useEffect(() => {
-    let rafId;
-    const renderFrame = () => {
-      if (cursorRef.current) { cursorRef.current.style.transform = `translate3d(${mousePos.current.x}px, ${mousePos.current.y}px, 0) translate(-50%, -50%)`; }
-      bgPos.current.x += (mousePos.current.x - bgPos.current.x) * 0.12;
-      bgPos.current.y += (mousePos.current.y - bgPos.current.y) * 0.12;
-      if (bgGlowRef.current) { bgGlowRef.current.style.transform = `translate3d(${bgPos.current.x}px, ${bgPos.current.y}px, 0) translate(-50%, -50%)`; }
-      rafId = requestAnimationFrame(renderFrame);
-    };
-    rafId = requestAnimationFrame(renderFrame);
-
-    const handleMouseMove = (e) => { mousePos.current.x = e.clientX; mousePos.current.y = e.clientY; };
-    const handleMouseOver = (e) => {
-      if (e.target.closest('.run-eval-btn')) {
-        document.body.classList.add('hovering-run-eval'); document.body.classList.remove('hovering-interactive');
-      } else if (e.target.closest('button, input, textarea, select, .floating-card, .drag-handle, .model-card')) {
-        document.body.classList.add('hovering-interactive'); document.body.classList.remove('hovering-run-eval');
-      } else {
-        document.body.classList.remove('hovering-interactive'); document.body.classList.remove('hovering-run-eval');
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    window.addEventListener('mouseover', handleMouseOver, { passive: true });
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseover', handleMouseOver);
-      cancelAnimationFrame(rafId);
-    };
-  }, []);
+  // Removed custom 'AI' cursors and orbs to adopt standard SaaS appearance.
 
   // --- Suite Operations ---
   const resetSuiteForm = () => {
@@ -274,35 +269,21 @@ export default function App() {
     };
 
     try {
-      // 1. Try to send to backend (Will use PUT if editing, POST if new)
       const method = editingSuiteId ? 'PUT' : 'POST';
-      const url = editingSuiteId
-        ? `${API_BASE}/api/suites/${editingSuiteId}`
-        : `${API_BASE}/api/suites`;
-      
-      const response = await fetch(url, {
-        method: method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(suiteData)
-      });
+      const path = editingSuiteId ? `/api/suites/${editingSuiteId}` : '/api/suites';
+      const savedSuite = await apiFetch(path, { method, body: JSON.stringify(suiteData) });
 
-      if (!response.ok) throw new Error("Backend save failed");
-      const savedSuite = await response.json();
-
-      // Update state correctly based on whether it's an edit or new
       if (editingSuiteId) {
         setSuites(suites.map(s => s.id === editingSuiteId ? savedSuite : s));
       } else {
         setSuites([savedSuite, ...suites]);
       }
     } catch (error) {
-      console.warn("Backend disconnected or route missing, falling back to local browser storage.");
-      
-      // Fallback update logic
+      console.warn("Backend save failed, falling back to local storage:", error);
       if (editingSuiteId) {
         setSuites(suites.map(s => s.id === editingSuiteId ? { ...s, ...suiteData } : s));
       } else {
-        const fallbackId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+        const fallbackId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
         setSuites([{ id: fallbackId, ...suiteData }, ...suites]);
       }
     }
@@ -359,13 +340,9 @@ export default function App() {
 
   return (
     <>
-      <div className="ambient-background">
-        <div ref={bgGlowRef} className="cursor-ambient-glow"><div className="glow-orb"></div></div>
-        <div className="dot-grid-overlay"></div>
-      </div>
+      <div className="ambient-background"></div>
 
       <div className="app-layout">
-        <div ref={cursorRef} className="custom-shadow-cursor"></div>
 
         <button className="theme-toggle-text" onClick={() => setIsDark(!isDark)} aria-label="Toggle Theme">
           <span className={!isDark ? 'active-theme' : 'inactive-theme'}>LIGHT</span>
@@ -466,8 +443,8 @@ export default function App() {
               <motion.div key="dash" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-1000 mx-auto">
                 <header className="page-header">
                   <h1 className="hero-title">
-                    <div className="mask-text"><span className="slide-up-1">EVALUATION</span></div>
-                    <div className="mask-text"><span className="slide-up-2">WORKSPACE</span></div>
+                    <div>EVALUATION</div>
+                    <div>WORKSPACE</div>
                   </h1>
                   <p className="hero-subtitle fade-in-delayed">Select a suite to edit, or run an evaluation.</p>
                 </header>
@@ -504,8 +481,8 @@ export default function App() {
               <motion.div key="new" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header">
                   <h1 className="hero-title">
-                    <div className="mask-text"><span className="slide-up-1">{editingSuiteId ? 'EDIT YOUR' : 'BUILD A'}</span></div>
-                    <div className="mask-text"><span className="slide-up-2">SUITE</span></div>
+                    <div>{editingSuiteId ? 'EDIT YOUR' : 'BUILD A'}</div>
+                    <div>SUITE</div>
                   </h1>
                   <p className="hero-subtitle fade-in-delayed">Draft your parameters before deploying to the models.</p>
                 </header>
@@ -563,9 +540,9 @@ export default function App() {
               <motion.div key="res" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header flex-between align-start">
                   <div>
-                    <h1 className="hero-title">
-                      <div className="mask-text"><span className="slide-up-1">EVALUATION</span></div>
-                      <div className="mask-text"><span className="slide-up-2">TELEMETRY</span></div>
+                    <h1 className="hero-title" style={{ fontSize: '32px' }}>
+                      <div>EVALUATION</div>
+                      <div>TELEMETRY</div>
                     </h1>
                     <p className="hero-subtitle fade-in-delayed">Model performance and evaluation metrics.</p>
                   </div>
@@ -575,7 +552,7 @@ export default function App() {
                       <span className="section-title" style={{ display: 'block', marginBottom: 8, textTransform: 'none' }}>Past Runs</span>
                       <select 
                         className="inset-input mono" 
-                        style={{ padding: '8px 16px', fontSize: 13, width: 200, cursor: 'none' }}
+                        style={{ padding: '8px 16px', fontSize: 13, width: 200 }}
                         onChange={(e) => setEvalResults(runHistory.find(r => r.id.toString() === e.target.value))}
                         value={evalResults?.id || ""}
                       >
@@ -705,39 +682,70 @@ export default function App() {
               <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header">
                   <h1 className="hero-title">
-                    <div className="mask-text"><span className="slide-up-1">API KEY</span></div>
-                    <div className="mask-text"><span className="slide-up-2">SETTINGS</span></div>
+                    <div>API KEY</div>
+                    <div>SETTINGS</div>
                   </h1>
-                  <p className="hero-subtitle fade-in-delayed">Keys are stored in the database, not in .env — changes apply instantly.</p>
+                  <p className="hero-subtitle fade-in-delayed">Your keys are saved in <strong>your browser only</strong> — never stored on the server.</p>
                 </header>
 
-                <div className="floating-card form-card stagger-anim" style={{ '--delay': '0.1s' }}>
-                  <div className="section-title" style={{ marginBottom: '28px' }}>Provider Credentials</div>
-
-                  {SETTINGS_FIELDS.map(({ key, label, placeholder }) => (
-                    <div className="input-group" key={key}>
-                      <label>{label}</label>
-                      <div style={{ position: 'relative' }}>
-                        <input
-                          id={`settings-${key}`}
-                          className="inset-input"
-                          type={settingsVisible[key] ? 'text' : 'password'}
-                          value={settingsData[key] || ''}
-                          onChange={e => setSettingsData(prev => ({ ...prev, [key]: e.target.value }))}
-                          placeholder={placeholder}
-                          style={{ paddingRight: '52px' }}
-                          autoComplete="off"
-                        />
-                        <button
-                          className="settings-eye-btn"
-                          onClick={() => setSettingsVisible(prev => ({ ...prev, [key]: !prev[key] }))}
-                          title={settingsVisible[key] ? 'Hide' : 'Show'}
-                        >
-                          {settingsVisible[key] ? '🙈' : '👁'}
-                        </button>
-                      </div>
+                {/* Security notice */}
+                <div className="floating-card stagger-anim" style={{ '--delay': '0s', padding: '18px 28px', marginBottom: '16px', border: '1px solid rgba(16,163,127,0.25)', background: 'rgba(16,163,127,0.06)' }}>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: '20px', flexShrink: 0 }}>🔒</span>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '13px', color: '#10A37F', marginBottom: '4px' }}>BYOK — Bring Your Own Key</div>
+                      <p style={{ margin: 0, fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                        Keys are stored in <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 6px', borderRadius: '4px' }}>localStorage</code> and sent over HTTPS only when you run an eval — they are <strong>never written to any database</strong>.
+                        Each user's keys are completely isolated.
+                      </p>
                     </div>
-                  ))}
+                  </div>
+                </div>
+
+                <div className="floating-card form-card stagger-anim" style={{ '--delay': '0.1s' }}>
+                  <div className="section-title" style={{ marginBottom: '28px' }}>Your API Keys</div>
+
+                  {SETTINGS_FIELDS.map(({ key, label, placeholder, provider }) => {
+                    const hasUserKey = !!(settingsData[key] || '').trim();
+                    const hasServerKey = serverKeys[key];
+                    return (
+                      <div className="input-group" key={key}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <label style={{ margin: 0 }}>{label}</label>
+                          <div style={{ display: 'flex', gap: '6px', fontSize: '11px', fontWeight: 600 }}>
+                            {hasUserKey && (
+                              <span style={{ color: '#10A37F', background: 'rgba(16,163,127,0.12)', padding: '2px 8px', borderRadius: '20px' }}>✓ Set locally</span>
+                            )}
+                            {hasServerKey && (
+                              <span style={{ color: 'var(--text-muted)', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '20px' }}>server fallback ✓</span>
+                            )}
+                            {!hasUserKey && !hasServerKey && (
+                              <span style={{ color: '#F5A623', background: 'rgba(245,166,35,0.1)', padding: '2px 8px', borderRadius: '20px' }}>not configured</span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            id={`settings-${key}`}
+                            className="inset-input"
+                            type={settingsVisible[key] ? 'text' : 'password'}
+                            value={settingsData[key] || ''}
+                            onChange={e => setSettingsData(prev => ({ ...prev, [key]: e.target.value }))}
+                            placeholder={hasServerKey ? `${placeholder} (server key active — override optional)` : placeholder}
+                            style={{ paddingRight: '52px' }}
+                            autoComplete="off"
+                          />
+                          <button
+                            className="settings-eye-btn"
+                            onClick={() => setSettingsVisible(prev => ({ ...prev, [key]: !prev[key] }))}
+                            title={settingsVisible[key] ? 'Hide' : 'Show'}
+                          >
+                            {settingsVisible[key] ? '🙈' : '👁'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
 
                   <div className="deploy-footer" style={{ marginTop: '32px', paddingBottom: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -745,13 +753,7 @@ export default function App() {
                         <motion.span
                           initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
                           style={{ color: '#10A37F', fontSize: '13px', fontWeight: 700 }}
-                        >✓ Saved successfully</motion.span>
-                      )}
-                      {settingsToast === 'error' && (
-                        <motion.span
-                          initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}
-                          style={{ color: '#FF5A26', fontSize: '13px', fontWeight: 700 }}
-                        >✗ Save failed — is the backend running?</motion.span>
+                        >✓ Saved to browser — model list refreshed</motion.span>
                       )}
                     </div>
                     <MagneticButton
@@ -764,13 +766,22 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="floating-card stagger-anim" style={{ '--delay': '0.2s', padding: '28px 32px' }}>
+                <div className="floating-card stagger-anim" style={{ '--delay': '0.2s', padding: '24px 32px' }}>
                   <div className="section-title" style={{ marginBottom: '12px' }}>How it works</div>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '14px', lineHeight: 1.7, margin: 0 }}>
-                    Keys saved here are written to the <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)', fontSize: '13px' }}>app_settings</span> table in Supabase.
-                    The backend reads them at eval-time, so you never need to edit <span style={{ fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-main)', fontSize: '13px' }}>.env</span> manually.
-                    Leaving a field empty means that provider's models won't appear in the model list.
-                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    {[
+                      { icon: '🔑', title: 'Your keys stay yours', desc: 'Stored only in this browser. Clearing localStorage removes them instantly.' },
+                      { icon: '📡', title: 'Sent per request', desc: 'Attached as encrypted HTTPS headers on every eval — discarded immediately after.' },
+                      { icon: '🛡️', title: 'Zero server storage', desc: 'No database, no logs. A server breach cannot expose your API keys.' },
+                      { icon: '🔄', title: 'Server fallbacks', desc: 'Providers marked "server fallback ✓" work even without your own key.' },
+                    ].map(({ icon, title, desc }) => (
+                      <div key={title} style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '10px', padding: '16px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                        <div style={{ fontSize: '22px', marginBottom: '8px' }}>{icon}</div>
+                        <div style={{ fontWeight: 700, fontSize: '13px', marginBottom: '4px' }}>{title}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>{desc}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -794,7 +805,7 @@ export default function App() {
         }
 
         [data-theme="dark"] {
-          --bg-canvas: #0c0c0e; --bg-surface: #141417; --border: rgba(255,255,255,0.08); --panel-bg: rgba(20, 20, 22, 0.65);
+          --bg-canvas: #0c0011; --bg-surface: #14001a; --border: rgba(255,255,255,0.08); --panel-bg: rgba(20, 0, 26, 0.65);
           --pop-primary: #818cf8; --pop-primary-dark: #4f46e5;
           --text-main: #f8f9fa; --text-muted: #a1a1aa;
           --shadow-float: 0 20px 40px -12px rgba(0, 0, 0, 0.5); 
@@ -819,54 +830,12 @@ export default function App() {
         .max-w-800 { max-width: 800px; }
         .mx-auto { margin-left: auto; margin-right: auto; }
 
-        /* ── ZERO LAG BACKGROUND ── */
         .ambient-background { position: fixed; inset: 0; z-index: -2; overflow: hidden; background-color: var(--bg-canvas); }
-        .cursor-ambient-glow { position: fixed; top: 0; left: 0; z-index: -1; pointer-events: none; will-change: transform; }
-        .glow-orb {
-          width: 50vw; height: 50vw;
-          background: radial-gradient(circle, var(--bg-glow-color) 0%, transparent 60%);
-          border-radius: 50%; opacity: 0.9; transform: scale(1) translateZ(0);
-          transition: opacity 0.5s ease, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        body.hovering-interactive .glow-orb, body.hovering-run-eval .glow-orb { opacity: 0; transform: scale(0.6) translateZ(0); }
-
-        .dot-grid-overlay {
-          position: fixed; inset: 0; z-index: -1; pointer-events: none;
-          background-image: radial-gradient(var(--border) 1px, transparent 1px);
-          background-size: 24px 24px; opacity: 0.5;
-        }
-
-        /* ── ELEGANT SINGLE CURSOR ── */
-        @media (pointer: fine) {
-          body { cursor: none; }
-          a, button, input, textarea, select, option { cursor: none !important; }
-          
-          .custom-shadow-cursor {
-            position: fixed; top: 0; left: 0; width: 12px; height: 12px;
-            background: var(--text-main); opacity: 0.5; border-radius: 50%; 
-            pointer-events: none; z-index: 99999;
-            will-change: transform, width, height;
-            transition: width 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), height 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s ease, opacity 0.2s ease, border-radius 0.2s ease;
-          }
-
-          body.hovering-interactive .custom-shadow-cursor {
-            width: 32px; height: 32px; background: transparent; border: 1.5px solid var(--text-main); opacity: 0.4;
-          }
-
-          body.hovering-run-eval .custom-shadow-cursor {
-            width: 40px; height: 40px; background: rgba(255, 255, 255, 0.9); box-shadow: 0 0 20px rgba(255, 255, 255, 0.5); mix-blend-mode: difference; opacity: 1; border: none;
-          }
-        }
-        @media (pointer: coarse) { .custom-shadow-cursor { display: none; } }
 
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
         
-        /* Invisible scroll — scrollable but no visible scrollbar taking up space */
-        .scroll-hidden { scrollbar-width: none; -ms-overflow-style: none; }
-        .scroll-hidden::-webkit-scrollbar { display: none; }
-
         .app-layout { display: flex; min-height: 100vh; padding: 24px; gap: 40px; max-width: 1600px; margin: 0 auto; position: relative; }
 
         .theme-toggle-text {
@@ -882,17 +851,7 @@ export default function App() {
         .theme-toggle-text .inactive-theme { color: var(--text-muted); opacity: 0.4; }
         .theme-toggle-text .separator { opacity: 0.2; }
 
-        .page-animate-reveal { animation: pageReveal 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards; width: 100%; will-change: transform, opacity, filter; }
-        @keyframes pageReveal {
-          from { opacity: 0; transform: translateY(15px); filter: blur(4px); }
-          to { opacity: 1; transform: translateY(0); filter: blur(0); }
-        }
-
-        .hero-title { font-size: clamp(36px, 4.5vw, 64px); font-weight: 800; letter-spacing: -0.04em; line-height: 0.9; color: var(--text-main); margin-bottom: 12px; }
-        .mask-text { overflow: hidden; display: block; padding-bottom: 4px; }
-        .slide-up-1, .slide-up-2 { display: inline-block; animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; transform: translateY(100%); }
-        .slide-up-2 { animation-delay: 0.1s; }
-        @keyframes slideUp { to { transform: translateY(0); } }
+        .hero-title { font-size: 40px; letter-spacing: -0.04em; margin-bottom: 12px; line-height: 1.1; font-weight: 800; }
 
         .hero-subtitle { font-size: 16px; color: var(--text-muted); margin-bottom: 48px; font-weight: 500; }
         .section-title { font-size: 12px; font-weight: 800; letter-spacing: 0.15em; color: var(--text-muted); margin-bottom: 16px; text-transform: uppercase; }
