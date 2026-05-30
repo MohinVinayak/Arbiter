@@ -55,12 +55,12 @@ async function apiFetch(path, init = {}) {
   return response.json();
 }
 const DYNAMIC_COLORS = [
-  { color: "#946055", bg: "rgba(148, 96, 85, 0.1)" },  // Terracotta
-  { color: "#7A8075", bg: "rgba(122, 128, 117, 0.1)" }, // Sage
-  { color: "#D5D7D0", bg: "rgba(213, 215, 208, 0.3)" }, // Sand/Clay
-  { color: "#2C332A", bg: "rgba(44, 51, 42, 0.1)" },   // Forest Charcoal
-  { color: "#B8857A", bg: "rgba(184, 133, 122, 0.1)" }, // Dusty Rose
-  { color: "#8E9389", bg: "rgba(142, 147, 137, 0.1)" }, // Muted Olive
+  { color: "#E2E8F0", bg: "rgba(226, 232, 240, 0.08)" }, 
+  { color: "#94A3B8", bg: "rgba(148, 163, 184, 0.08)" }, 
+  { color: "#60A5FA", bg: "rgba(96, 165, 250, 0.08)" }, 
+  { color: "#34D399", bg: "rgba(52, 211, 153, 0.08)" }, 
+  { color: "#FBBF24", bg: "rgba(251, 191, 36, 0.08)" }, 
+  { color: "#F87171", bg: "rgba(248, 113, 113, 0.08)" },  
 ];
 
 function formatModelLabel(rawId) {
@@ -238,7 +238,42 @@ export default function App() {
   };
 
   // ── High-Performance Single Cursor & Background ──
-  // Removed custom 'AI' cursors and orbs to adopt standard SaaS appearance.
+  const cursorRef = useRef(null);
+  const bgGlowRef = useRef(null);
+  const mousePos = useRef({ x: -1000, y: -1000 });
+  const bgPos = useRef({ x: -1000, y: -1000 });
+
+  useEffect(() => {
+    let rafId;
+    const renderFrame = () => {
+      if (cursorRef.current) { cursorRef.current.style.transform = `translate3d(${mousePos.current.x}px, ${mousePos.current.y}px, 0) translate(-50%, -50%)`; }
+      bgPos.current.x += (mousePos.current.x - bgPos.current.x) * 0.12;
+      bgPos.current.y += (mousePos.current.y - bgPos.current.y) * 0.12;
+      if (bgGlowRef.current) { bgGlowRef.current.style.transform = `translate3d(${bgPos.current.x}px, ${bgPos.current.y}px, 0) translate(-50%, -50%)`; }
+      rafId = requestAnimationFrame(renderFrame);
+    };
+    rafId = requestAnimationFrame(renderFrame);
+
+    const handleMouseMove = (e) => { mousePos.current.x = e.clientX; mousePos.current.y = e.clientY; };
+    const handleMouseOver = (e) => {
+      if (e.target.closest('.run-eval-btn')) {
+        document.body.classList.add('hovering-run-eval'); document.body.classList.remove('hovering-interactive');
+      } else if (e.target.closest('button, input, textarea, select, .floating-card, .drag-handle, .model-card')) {
+        document.body.classList.add('hovering-interactive'); document.body.classList.remove('hovering-run-eval');
+      } else {
+        document.body.classList.remove('hovering-interactive'); document.body.classList.remove('hovering-run-eval');
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+    window.addEventListener('mouseover', handleMouseOver, { passive: true });
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseover', handleMouseOver);
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   // --- Suite Operations ---
   const resetSuiteForm = () => {
@@ -340,9 +375,13 @@ export default function App() {
 
   return (
     <>
-      <div className="ambient-background"></div>
+      <div className="ambient-background">
+        <div ref={bgGlowRef} className="cursor-ambient-glow"><div className="glow-orb"></div></div>
+        <div className="dot-grid-overlay"></div>
+      </div>
 
       <div className="app-layout">
+        <div ref={cursorRef} className="custom-shadow-cursor"></div>
 
         <button className="theme-toggle-text" onClick={() => setIsDark(!isDark)} aria-label="Toggle Theme">
           <span className={!isDark ? 'active-theme' : 'inactive-theme'}>LIGHT</span>
@@ -443,8 +482,8 @@ export default function App() {
               <motion.div key="dash" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-1000 mx-auto">
                 <header className="page-header">
                   <h1 className="hero-title">
-                    <div>EVALUATION</div>
-                    <div>WORKSPACE</div>
+                    <div className="mask-text"><span className="slide-up-1">EVALUATION</span></div>
+                    <div className="mask-text"><span className="slide-up-2">WORKSPACE</span></div>
                   </h1>
                   <p className="hero-subtitle fade-in-delayed">Select a suite to edit, or run an evaluation.</p>
                 </header>
@@ -481,8 +520,8 @@ export default function App() {
               <motion.div key="new" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header">
                   <h1 className="hero-title">
-                    <div>{editingSuiteId ? 'EDIT YOUR' : 'BUILD A'}</div>
-                    <div>SUITE</div>
+                    <div className="mask-text"><span className="slide-up-1">{editingSuiteId ? 'EDIT YOUR' : 'BUILD A'}</span></div>
+                    <div className="mask-text"><span className="slide-up-2">SUITE</span></div>
                   </h1>
                   <p className="hero-subtitle fade-in-delayed">Draft your parameters before deploying to the models.</p>
                 </header>
@@ -540,9 +579,9 @@ export default function App() {
               <motion.div key="res" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header flex-between align-start">
                   <div>
-                    <h1 className="hero-title" style={{ fontSize: '32px' }}>
-                      <div>EVALUATION</div>
-                      <div>TELEMETRY</div>
+                    <h1 className="hero-title">
+                      <div className="mask-text"><span className="slide-up-1">EVALUATION</span></div>
+                      <div className="mask-text"><span className="slide-up-2">TELEMETRY</span></div>
                     </h1>
                     <p className="hero-subtitle fade-in-delayed">Model performance and evaluation metrics.</p>
                   </div>
@@ -552,7 +591,7 @@ export default function App() {
                       <span className="section-title" style={{ display: 'block', marginBottom: 8, textTransform: 'none' }}>Past Runs</span>
                       <select 
                         className="inset-input mono" 
-                        style={{ padding: '8px 16px', fontSize: 13, width: 200 }}
+                        style={{ padding: '8px 16px', fontSize: 13, width: 200, cursor: 'none' }}
                         onChange={(e) => setEvalResults(runHistory.find(r => r.id.toString() === e.target.value))}
                         value={evalResults?.id || ""}
                       >
@@ -682,8 +721,8 @@ export default function App() {
               <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header">
                   <h1 className="hero-title">
-                    <div>API KEY</div>
-                    <div>SETTINGS</div>
+                    <div className="mask-text"><span className="slide-up-1">API KEY</span></div>
+                    <div className="mask-text"><span className="slide-up-2">SETTINGS</span></div>
                   </h1>
                   <p className="hero-subtitle fade-in-delayed">Your keys are saved in <strong>your browser only</strong> — never stored on the server.</p>
                 </header>
@@ -793,26 +832,21 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-        :root, [data-theme="light"] {
-          --bg-canvas: #f8f9fa; --bg-surface: #ffffff; --border: #e9ecef; --panel-bg: rgba(255, 255, 255, 0.65);
-          --pop-primary: #5B4EE4; --pop-primary-dark: #3A30A1;
-          --text-main: #121212; --text-muted: #6c757d;
-          --shadow-float: 0 20px 40px -12px rgba(0, 0, 0, 0.05); 
-          --shadow-hover: 0 30px 60px -15px rgba(91, 78, 228, 0.12); 
-          --inner-glow: inset 0 1px 1px rgba(255,255,255,0.8);
-          --input-bg: #f8f9fa; --tooltip-bg: rgba(0,0,0,0.03);
-          --bg-glow-color: rgba(91, 78, 228, 0.15);
-        }
-
-        [data-theme="dark"] {
-          --bg-canvas: #0c0011; --bg-surface: #14001a; --border: rgba(255,255,255,0.08); --panel-bg: rgba(20, 0, 26, 0.65);
-          --pop-primary: #818cf8; --pop-primary-dark: #4f46e5;
-          --text-main: #f8f9fa; --text-muted: #a1a1aa;
-          --shadow-float: 0 20px 40px -12px rgba(0, 0, 0, 0.5); 
-          --shadow-hover: 0 30px 60px -15px rgba(129, 140, 248, 0.2); 
+        :root, [data-theme="light"], [data-theme="dark"] {
+          --bg-canvas: #000000; 
+          --bg-surface: #111111; 
+          --border: #222222; 
+          --text-main: #EDEDED; 
+          --text-muted: #888888;
+          --pop-primary: #FFFFFF; 
+          --pop-primary-dark: #A3A3A3;
+          --shadow-float: 0 12px 32px -8px rgba(0,0,0,0.8);
+          --tooltip-bg: rgba(255,255,255,0.05); 
+          --panel-bg: rgba(255,255,255,0.05);
+          --bg-glow-color: rgba(255,255,255,0.03);
           --inner-glow: inset 0 1px 1px rgba(255,255,255,0.05);
-          --input-bg: #000000; --tooltip-bg: rgba(255,255,255,0.05);
-          --bg-glow-color: rgba(129, 140, 248, 0.15);
+          --input-bg: #000000;
+          --shadow-hover: 0 30px 60px -15px rgba(255,255,255,0.1); 
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease; }
@@ -830,12 +864,54 @@ export default function App() {
         .max-w-800 { max-width: 800px; }
         .mx-auto { margin-left: auto; margin-right: auto; }
 
+        /* ── ZERO LAG BACKGROUND ── */
         .ambient-background { position: fixed; inset: 0; z-index: -2; overflow: hidden; background-color: var(--bg-canvas); }
+        .cursor-ambient-glow { position: fixed; top: 0; left: 0; z-index: -1; pointer-events: none; will-change: transform; }
+        .glow-orb {
+          width: 50vw; height: 50vw;
+          background: radial-gradient(circle, var(--bg-glow-color) 0%, transparent 60%);
+          border-radius: 50%; opacity: 0.9; transform: scale(1) translateZ(0);
+          transition: opacity 0.5s ease, transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        body.hovering-interactive .glow-orb, body.hovering-run-eval .glow-orb { opacity: 0; transform: scale(0.6) translateZ(0); }
+
+        .dot-grid-overlay {
+          position: fixed; inset: 0; z-index: -1; pointer-events: none;
+          background-image: radial-gradient(var(--border) 1px, transparent 1px);
+          background-size: 24px 24px; opacity: 0.5;
+        }
+
+        /* ── ELEGANT SINGLE CURSOR ── */
+        @media (pointer: fine) {
+          body { cursor: none; }
+          a, button, input, textarea, select, option { cursor: none !important; }
+          
+          .custom-shadow-cursor {
+            position: fixed; top: 0; left: 0; width: 12px; height: 12px;
+            background: var(--text-main); opacity: 0.5; border-radius: 50%; 
+            pointer-events: none; z-index: 99999;
+            will-change: transform, width, height;
+            transition: width 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), height 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s ease, opacity 0.2s ease, border-radius 0.2s ease;
+          }
+
+          body.hovering-interactive .custom-shadow-cursor {
+            width: 32px; height: 32px; background: transparent; border: 1.5px solid var(--text-main); opacity: 0.4;
+          }
+
+          body.hovering-run-eval .custom-shadow-cursor {
+            width: 40px; height: 40px; background: rgba(255, 255, 255, 0.9); box-shadow: 0 0 20px rgba(255, 255, 255, 0.5); mix-blend-mode: difference; opacity: 1; border: none;
+          }
+        }
+        @media (pointer: coarse) { .custom-shadow-cursor { display: none; } }
 
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
         
+        /* Invisible scroll — scrollable but no visible scrollbar taking up space */
+        .scroll-hidden { scrollbar-width: none; -ms-overflow-style: none; }
+        .scroll-hidden::-webkit-scrollbar { display: none; }
+
         .app-layout { display: flex; min-height: 100vh; padding: 24px; gap: 40px; max-width: 1600px; margin: 0 auto; position: relative; }
 
         .theme-toggle-text {
@@ -851,7 +927,17 @@ export default function App() {
         .theme-toggle-text .inactive-theme { color: var(--text-muted); opacity: 0.4; }
         .theme-toggle-text .separator { opacity: 0.2; }
 
-        .hero-title { font-size: 40px; letter-spacing: -0.04em; margin-bottom: 12px; line-height: 1.1; font-weight: 800; }
+        .page-animate-reveal { animation: pageReveal 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards; width: 100%; will-change: transform, opacity, filter; }
+        @keyframes pageReveal {
+          from { opacity: 0; transform: translateY(15px); filter: blur(4px); }
+          to { opacity: 1; transform: translateY(0); filter: blur(0); }
+        }
+
+        .hero-title { font-size: clamp(36px, 4.5vw, 64px); font-weight: 800; letter-spacing: -0.04em; line-height: 0.9; color: var(--text-main); margin-bottom: 12px; }
+        .mask-text { overflow: hidden; display: block; padding-bottom: 4px; }
+        .slide-up-1, .slide-up-2 { display: inline-block; animation: slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards; transform: translateY(100%); }
+        .slide-up-2 { animation-delay: 0.1s; }
+        @keyframes slideUp { to { transform: translateY(0); } }
 
         .hero-subtitle { font-size: 16px; color: var(--text-muted); margin-bottom: 48px; font-weight: 500; }
         .section-title { font-size: 12px; font-weight: 800; letter-spacing: 0.15em; color: var(--text-muted); margin-bottom: 16px; text-transform: uppercase; }
@@ -929,7 +1015,7 @@ export default function App() {
 
         /* Navigation Links */
         .brand { display: flex; flex-direction: column; gap: 4px; margin-bottom: 48px; }
-        .brand-text { font-size: 30px; font-weight: 900; letter-spacing: 0.18em; background: linear-gradient(135deg, var(--pop-primary) 0%, #a78bfa 50%, var(--pop-primary) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: none; line-height: 1; }
+        .brand-text { font-size: 30px; font-weight: 900; letter-spacing: 0.18em; color: var(--text-main); text-shadow: none; line-height: 1; }
         .brand-sub { font-size: 11px; font-weight: 800; color: var(--text-muted); letter-spacing: 0.22em; text-transform: uppercase; opacity: 0.7; }
         .nav-links { display: flex; flex-direction: column; gap: 8px; margin-bottom: auto; }
         .nav-btn { background: transparent; border: none; color: var(--text-muted); font-family: inherit; font-weight: 700; font-size: 15px; padding: 14px 16px; border-radius: 12px; display: flex; align-items: center; gap: 16px; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); cursor: pointer; }
@@ -940,14 +1026,14 @@ export default function App() {
         .models-section { padding-top: 32px; border-top: 1px dashed var(--border); flex-shrink: 1; min-height: 0; display: flex; flex-direction: column; }
         .models-stack { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: 200px; scrollbar-width: none; -ms-overflow-style: none; }
         .models-stack::-webkit-scrollbar { display: none; }
-        .model-card { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 700; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); cursor: pointer; }
-        .model-card .model-label { color: var(--text-muted); transition: color 0.3s ease; }
-        .model-card:hover { background: var(--mbg); border-color: var(--mc); transform: translateY(-3px) scale(1.02); box-shadow: 0 8px 20px rgba(0,0,0,0.05); }
+        .model-card { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; font-family: inherit; font-size: 13px; font-weight: 700; transition: all 0.2s ease; cursor: pointer; }
+        .model-card .model-label { color: var(--text-muted); transition: color 0.2s ease; }
+        .model-card:hover { background: var(--mbg); border-color: var(--mc); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
         .model-card:hover .model-label { color: var(--mc); }
         .model-card:hover .model-indicator { background: var(--mc) !important; }
-        .model-card.active { background: var(--mbg); border-color: var(--mc); box-shadow: 0 4px 12px rgba(0,0,0,0.05); z-index: 1; }
+        .model-card.active { background: var(--mbg); border-color: var(--mc); box-shadow: 0 2px 8px rgba(0,0,0,0.05); z-index: 1; }
         .model-card.active .model-label { color: var(--mc); }
-        .model-indicator { width: 10px; height: 10px; border-radius: 50%; transition: 0.3s; background: var(--border); }
+        .model-indicator { width: 10px; height: 10px; border-radius: 50%; transition: 0.2s; background: var(--border); }
         .active-ring { position: absolute; inset: -2px; border: 2px solid; border-radius: 14px; opacity: 0.2; pointer-events: none; }
 
         /* Forms */
