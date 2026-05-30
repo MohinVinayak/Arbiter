@@ -119,15 +119,9 @@ function MagneticButton({ children, className, onClick, style }) {
 // ============================================================================
 export default function App() {
   const [page, setPage] = useState("dashboard");
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window !== 'undefined') return JSON.parse(localStorage.getItem('themeDark')) || false;
-    return false;
-  });
-  
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-    localStorage.setItem('themeDark', JSON.stringify(isDark));
-  }, [isDark]);
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }, []);
   
   const [models, setModels] = useState({});
   const [selectedModels, setSelectedModels] = useState([]);
@@ -383,11 +377,7 @@ export default function App() {
       <div className="app-layout">
         <div ref={cursorRef} className="custom-shadow-cursor"></div>
 
-        <button className="theme-toggle-text" onClick={() => setIsDark(!isDark)} aria-label="Toggle Theme">
-          <span className={!isDark ? 'active-theme' : 'inactive-theme'}>LIGHT</span>
-          <span className="separator">/</span>
-          <span className={isDark ? 'active-theme' : 'inactive-theme'}>DARK</span>
-        </button>
+
 
         <nav className="sidebar floating-panel fade-in-up">
           <div className="brand">
@@ -913,18 +903,7 @@ export default function App() {
 
         .app-layout { display: flex; min-height: 100vh; padding: 24px; gap: 40px; max-width: 1600px; margin: 0 auto; position: relative; }
 
-        .theme-toggle-text {
-          position: fixed; top: 24px; right: 24px; z-index: 100;
-          background: var(--panel-bg); backdrop-filter: blur(20px); border: 1px solid var(--border); border-radius: 30px;
-          display: flex; gap: 12px; align-items: center; justify-content: center;
-          padding: 10px 20px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
-          color: var(--text-muted); box-shadow: var(--shadow-float), var(--inner-glow); transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-        .theme-toggle-text:hover { border-color: var(--text-main); transform: translateY(-3px); }
-        .theme-toggle-text span { transition: color 0.3s ease, opacity 0.3s ease; }
-        .theme-toggle-text .active-theme { color: var(--text-main); opacity: 1; }
-        .theme-toggle-text .inactive-theme { color: var(--text-muted); opacity: 0.4; }
-        .theme-toggle-text .separator { opacity: 0.2; }
+
 
         .page-animate-reveal { animation: pageReveal 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards; width: 100%; will-change: transform, opacity, filter; }
         @keyframes pageReveal {
