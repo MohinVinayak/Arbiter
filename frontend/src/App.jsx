@@ -827,15 +827,15 @@ export default function App() {
           --border: #222222; 
           --text-main: #EDEDED; 
           --text-muted: #888888;
-          --pop-primary: #FFFFFF; 
-          --pop-primary-dark: #A3A3A3;
+          --pop-primary: #00E5FF; 
+          --pop-primary-dark: #008B99;
           --shadow-float: 0 12px 32px -8px rgba(0,0,0,0.8);
           --tooltip-bg: rgba(255,255,255,0.05); 
           --panel-bg: rgba(255,255,255,0.05);
-          --bg-glow-color: rgba(255,255,255,0.03);
+          --bg-glow-color: rgba(0, 229, 255, 0.12);
           --inner-glow: inset 0 1px 1px rgba(255,255,255,0.05);
           --input-bg: #000000;
-          --shadow-hover: 0 30px 60px -15px rgba(255,255,255,0.1); 
+          --shadow-hover: 0 30px 60px -15px rgba(0, 229, 255, 0.2); 
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease; }
@@ -979,7 +979,7 @@ export default function App() {
         .empty-state { padding: 80px 40px; text-align: center; border: 1px dashed var(--border); box-shadow: none; background: transparent; display: flex; flex-direction: column; align-items: center; justify-content: center;}
 
         /* Buttons */
-        .btn-3d { background: var(--pop-primary); color: #fff; font-family: inherit; font-weight: 800; border: none; border-radius: 12px; box-shadow: 0 4px 0 var(--pop-primary-dark), 0 8px 16px rgba(0,0,0,0.1); transform: translateY(-2px); transition: transform 0.1s ease, box-shadow 0.1s ease; }
+        .btn-3d { background: var(--pop-primary); color: var(--bg-surface); font-family: inherit; font-weight: 800; border: none; border-radius: 12px; box-shadow: 0 4px 0 var(--pop-primary-dark), 0 8px 16px rgba(0,0,0,0.1); transform: translateY(-2px); transition: transform 0.1s ease, box-shadow 0.1s ease; }
         .btn-3d:active { transform: translateY(2px); box-shadow: 0 0 0 var(--pop-primary-dark), 0 0 0 transparent; }
         .btn-3d.small { padding: 10px 20px; font-size: 13px; }
         .btn-3d.large { padding: 16px 36px; font-size: 15px; border-radius: 16px; box-shadow: 0 6px 0 var(--pop-primary-dark); transform: translateY(-4px); }
