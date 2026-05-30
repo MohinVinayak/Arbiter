@@ -275,7 +275,7 @@ export default function App() {
     setEditingSuiteId(null);
     setNewSuiteName("");
     setNewSuiteDesc("");
-    setTestCases([{ prompt_template: "", expected_output: "" }]);
+    setTestCases([{ prompt_template: "", expected_output: "", checks_json: "" }]);
   };
 
   const handleEditSuite = (suite) => {
@@ -283,13 +283,21 @@ export default function App() {
     setNewSuiteName(suite.name);
     setNewSuiteDesc(suite.description);
     // If the suite has cases saved, load them. Otherwise load one empty case.
-    setTestCases(suite.cases && suite.cases.length > 0 ? suite.cases : [{ prompt_template: "", expected_output: "" }]);
+    setTestCases(suite.cases && suite.cases.length > 0 
+      ? suite.cases.map(c => ({ ...c, checks_json: c.checks ? JSON.stringify(c.checks, null, 2) : "" }))
+      : [{ prompt_template: "", expected_output: "", checks_json: "" }]);
     setPage("new-suite");
   };
 
   const handleDeploySuite = async () => {
     const validCases = testCases.filter(tc => tc.prompt_template.trim() !== "");
-    const finalCases = validCases.length > 0 ? validCases : [{ prompt_template: "", expected_output: "" }];
+    const finalCases = validCases.length > 0 ? validCases.map(c => {
+      let parsedChecks = null;
+      if (c.checks_json && c.checks_json.trim()) {
+        try { parsedChecks = JSON.parse(c.checks_json); } catch (e) { console.error("Invalid checks JSON"); }
+      }
+      return { prompt_template: c.prompt_template, expected_output: c.expected_output, checks: parsedChecks };
+    }) : [{ prompt_template: "", expected_output: "", checks: null }];
     
     const suiteData = {
       name: newSuiteName || "Untitled Suite",
@@ -530,7 +538,7 @@ export default function App() {
 
                 <div className="flex-between mb-4 fade-in-delayed">
                   <h2 className="section-title" style={{marginBottom: 0}}>TEST CASES</h2>
-                  <button onClick={() => setTestCases([...testCases, { prompt_template: "", expected_output: "" }])} className="btn-secondary">+ Add Card</button>
+                  <button onClick={() => setTestCases([...testCases, { prompt_template: "", expected_output: "", checks_json: "" }])} className="btn-secondary">+ Add Card</button>
                 </div>
 
                 <div className="cases-stack">
@@ -546,6 +554,10 @@ export default function App() {
                       <div className="input-group">
                         <label>Expected Output Reference</label>
                         <textarea className="inset-input" rows={2} value={tc.expected_output} onChange={e => { const updated = [...testCases]; updated[i].expected_output = e.target.value; setTestCases(updated); }} placeholder="Reference text for the evaluator..." />
+                      </div>
+                      <div className="input-group">
+                        <label>Deterministic Checks (Optional JSON)</label>
+                        <textarea className="inset-input mono" rows={2} value={tc.checks_json || ""} onChange={e => { const updated = [...testCases]; updated[i].checks_json = e.target.value; setTestCases(updated); }} placeholder='[{"type": "is_json"}, {"type": "must_contain", "value": "keyword"}]' />
                       </div>
                       {testCases.length > 1 && (<button className="btn-text-danger" onClick={() => setTestCases(testCases.filter((_, index) => index !== i))}>Remove Case</button>)}
                     </div>
