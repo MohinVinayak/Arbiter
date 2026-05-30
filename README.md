@@ -4,7 +4,7 @@
 
 ## Key Features
 
-- **Multi-Model Concurrency**: Fire multiple LLM completions at once (Gemini, Groq/LLaMA, GPT-4o-mini, Anthropic).
+- **Multi-Model Concurrency**: Fire multiple LLM completions at once (Gemini, Groq/LLaMA, OpenAI, Anthropic, Deepseek, Mistral, OpenRouter).
 - **BYOK (Bring Your Own Key) Security**: Keys are securely stored locally in the browser's `localStorage` and sent over HTTPS only when running an evaluation. They are never written to any server database. Server fallbacks are also supported.
 - **Three-Tier Evaluation Engine**:
   - **Deterministic Checks**: JSON compliance, strict string matching, length validation, RegEx rules.
@@ -45,7 +45,8 @@ A visual tour of the Arbiter evaluation platform in action.
 | Frontend | React + Vite, vanilla CSS, Framer Motion, Recharts |
 | Backend | FastAPI, Pydantic, SQLAlchemy ORM |
 | Database | SQLite (Local) / PostgreSQL (Production) |
-| Orchestration | Docker Compose |
+| Architecture| Vercel (Frontend Hosting) + Railway (Backend/DB) |
+| Orchestration | Docker Compose (Local Development) |
 
 ## Security & BYOK Architecture
 
@@ -58,7 +59,7 @@ Arbiter is designed with a **Bring Your Own Key** architecture.
 
 *Note: For public deployments, the server can still be configured with fallback API keys in `.env` for users who do not provide their own.*
 
-## Quickstart (Docker)
+## Quickstart (Local Docker)
 
 1. Launch the platform:
 ```bash
@@ -67,6 +68,21 @@ docker-compose up --build -d
 
 2. Open `http://localhost/` (Nginx) or `http://localhost:5173/` (Vite dev).
 3. Open the **Settings** page in the UI to add your API keys.
+
+## Deployment Architecture
+
+Arbiter is designed to be easily deployed to modern serverless and containerized cloud providers.
+
+### Frontend (Vercel)
+1. Push the repository to GitHub.
+2. Import the `frontend` directory into Vercel as a Vite project.
+3. Set the `VITE_API_URL` environment variable to your backend domain (e.g., `https://arbiter-backend.up.railway.app`).
+
+### Backend (Railway)
+1. Connect your GitHub repository to Railway.
+2. Railway will automatically detect the `railway.json` configuration in the `backend` directory.
+3. Provision a PostgreSQL database in Railway and link it to the backend service.
+4. The backend will automatically create all necessary tables upon startup.
 
 ## Injecting Custom Models
 
