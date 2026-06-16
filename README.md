@@ -61,6 +61,92 @@ Arbiter is designed with a **Bring Your Own Key** architecture.
 
 *Note: For public deployments, the server can still be configured with fallback API keys in `.env` for users who do not provide their own.*
 
+## System Architecture Diagram
+
+```mermaid
+flowchart TD
+
+subgraph group_ui["Browser UI"]
+  node_frontend_app["App<br/>React shell<br/>[App.jsx]"]
+  node_frontend_main["Main<br/>React bootstrap<br/>[main.jsx]"]
+  node_frontend_state["Browser state<br/>LocalStorage BYOK<br/>[index.css]"]
+  node_frontend_assets["Assets"]
+end
+
+subgraph group_api["FastAPI Backend"]
+  node_backend_main["API app<br/>FastAPI entry<br/>[main.py]"]
+  node_backend_config["Config<br/>[config.py]"]
+  node_backend_db[("Database<br/>SQLAlchemy setup<br/>[database.py]")]
+  node_routes_runs["Runs routes<br/>API routes<br/>[runs.py]"]
+  node_routes_suites["Suites routes<br/>API routes<br/>[suites.py]"]
+  node_routes_settings["Settings routes<br/>API routes<br/>[settings.py]"]
+  node_service_runner["LLM runner<br/>Inference orchestration<br/>[llm_runner.py]"]
+  node_service_eval["Evaluator<br/>Scoring pipeline<br/>[evaluator.py]"]
+  node_model_runs[("Run record<br/>Run model<br/>[run.py]")]
+  node_model_suites[("Suite model<br/>[test_suite.py]")]
+  node_model_settings[("Settings model<br/>App model<br/>[settings.py]")]
+  node_utils_keys["Key utils<br/>Key routing<br/>[keys.py]"]
+  node_schemas_settings["Settings schema<br/>Pydantic schema<br/>[settings.py]"]
+end
+
+subgraph group_external["External Systems"]
+  node_provider_apis{{"Model APIs<br/>Provider endpoints"}}
+  node_sql_db[("SQLite/Postgres<br/>Persistent store")]
+end
+
+node_frontend_main -->|"mounts"| node_frontend_app
+node_frontend_app -->|"reads keys"| node_frontend_state
+node_frontend_app -->|"suite CRUD"| node_routes_suites
+node_frontend_app -->|"settings"| node_routes_settings
+node_frontend_app -->|"run history"| node_routes_runs
+node_frontend_app -.->|"renders"| node_frontend_assets
+node_backend_main -->|"registers"| node_routes_runs
+node_backend_main -->|"registers"| node_routes_suites
+node_backend_main -->|"registers"| node_routes_settings
+node_routes_runs -->|"executes"| node_service_runner
+node_routes_runs -->|"persists"| node_model_runs
+node_routes_suites -->|"stores"| node_model_suites
+node_routes_settings -->|"validates"| node_schemas_settings
+node_routes_settings -->|"persists"| node_model_settings
+node_service_runner -->|"auth keys"| node_utils_keys
+node_service_runner -->|"calls"| node_provider_apis
+node_service_runner -->|"hands off"| node_service_eval
+node_service_eval -->|"writes results"| node_model_runs
+node_backend_db -->|"connects"| node_sql_db
+node_model_runs -.->|"via session"| node_backend_db
+node_model_suites -.->|"via session"| node_backend_db
+node_model_settings -.->|"via session"| node_backend_db
+
+click node_frontend_app "https://github.com/mohinvinayak/arbiter/blob/main/frontend/src/App.jsx"
+click node_frontend_main "https://github.com/mohinvinayak/arbiter/blob/main/frontend/src/main.jsx"
+click node_frontend_state "https://github.com/mohinvinayak/arbiter/blob/main/frontend/src/index.css"
+click node_frontend_assets "https://github.com/mohinvinayak/arbiter/tree/main/frontend/src/assets"
+click node_backend_main "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/main.py"
+click node_backend_config "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/config.py"
+click node_backend_db "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/database.py"
+click node_routes_runs "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/routes/runs.py"
+click node_routes_suites "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/routes/suites.py"
+click node_routes_settings "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/routes/settings.py"
+click node_service_runner "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/services/llm_runner.py"
+click node_service_eval "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/services/evaluator.py"
+click node_model_runs "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/models/run.py"
+click node_model_suites "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/models/test_suite.py"
+click node_model_settings "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/models/settings.py"
+click node_utils_keys "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/utils/keys.py"
+click node_schemas_settings "https://github.com/mohinvinayak/arbiter/blob/main/backend/app/schemas/settings.py"
+
+classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
+classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+class node_frontend_app,node_frontend_main,node_frontend_state,node_frontend_assets toneBlue
+class node_backend_main,node_backend_config,node_backend_db,node_routes_runs,node_routes_suites,node_routes_settings,node_service_runner,node_service_eval,node_model_runs,node_model_suites,node_model_settings,node_utils_keys,node_schemas_settings toneAmber
+class node_provider_apis,node_sql_db toneMint
+```
+
 ## Quickstart (Local Docker)
 
 1. Launch the platform:
