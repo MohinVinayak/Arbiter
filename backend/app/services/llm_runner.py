@@ -9,12 +9,22 @@ from app.utils.keys import get_resolved_keys
 
 logger = logging.getLogger("uvicorn.error")
 
+# ── Client cache (keyed by frozenset of resolved key values) ──────────────
+_client_cache: dict[frozenset, dict] = {}
+
+LLM_TIMEOUT = 30  # seconds
+
 
 def _make_clients(resolved: dict) -> dict:
+    """Create or retrieve cached API clients for the given resolved keys."""
+    cache_key = frozenset(sorted(resolved.items()))
+    if cache_key in _client_cache:
+        return _client_cache[cache_key]
+
     def _oa(key, base_url):
         return AsyncOpenAI(api_key=key, base_url=base_url) if key else None
 
-    return {
+    clients = {
         "gemini":    genai.Client(api_key=resolved["gemini_api_key"]) if resolved.get("gemini_api_key") else None,
         "groq":      _oa(resolved.get("groq_api_key"),      "https://api.groq.com/openai/v1"),
         "github":    _oa(resolved.get("github_token"),       "https://models.inference.ai.azure.com"),
@@ -24,6 +34,8 @@ def _make_clients(resolved: dict) -> dict:
         "mistral":   _oa(resolved.get("mistral_api_key"),    "https://api.mistral.ai/v1"),
         "openrouter":_oa(resolved.get("openrouter_api_key"), "https://openrouter.ai/api/v1"),
     }
+    _client_cache[cache_key] = clients
+    return clients
 
 
 async def run_llm(model: str, prompt: str, resolved: dict = None) -> dict:
@@ -34,28 +46,32 @@ async def run_llm(model: str, prompt: str, resolved: dict = None) -> dict:
     try:
         logger.info(f"   -> Calling: {model}")
         if model.startswith("google/"):
-            return await _run_gemini(clients["gemini"], model.replace("google/", ""), prompt, start)
+            coro = _run_gemini(clients["gemini"], model.replace("google/", ""), prompt, start)
         elif model.startswith("groq/"):
             if not clients["groq"]: return _error("Groq key not configured", start)
-            return await _run_oa(clients["groq"], model.replace("groq/", ""), prompt, start)
+            coro = _run_oa(clients["groq"], model.replace("groq/", ""), prompt, start)
         elif model.startswith("github/"):
             if not clients["github"]: return _error("GitHub token not configured", start)
-            return await _run_oa(clients["github"], model.replace("github/", ""), prompt, start)
+            coro = _run_oa(clients["github"], model.replace("github/", ""), prompt, start)
         elif model.startswith("anthropic/"):
             if not clients["anthropic"]: return _error("Anthropic key not configured", start)
-            return await _run_anthropic(clients["anthropic"], model.replace("anthropic/", ""), prompt, start)
+            coro = _run_anthropic(clients["anthropic"], model.replace("anthropic/", ""), prompt, start)
         elif model.startswith("deepseek/"):
             if not clients["deepseek"]: return _error("DeepSeek key not configured", start)
-            return await _run_oa(clients["deepseek"], model.replace("deepseek/", ""), prompt, start)
+            coro = _run_oa(clients["deepseek"], model.replace("deepseek/", ""), prompt, start)
         elif model.startswith("mistral/"):
             if not clients["mistral"]: return _error("Mistral key not configured", start)
-            return await _run_oa(clients["mistral"], model.replace("mistral/", ""), prompt, start)
+            coro = _run_oa(clients["mistral"], model.replace("mistral/", ""), prompt, start)
         elif model.startswith("openai/"):
             if not clients["openai"]: return _error("OpenAI key not configured", start)
-            return await _run_oa(clients["openai"], model.replace("openai/", ""), prompt, start)
+            coro = _run_oa(clients["openai"], model.replace("openai/", ""), prompt, start)
         else:
             if not clients["openrouter"]: return _error("OpenRouter key not configured", start)
-            return await _run_oa(clients["openrouter"], model, prompt, start)
+            coro = _run_oa(clients["openrouter"], model, prompt, start)
+        return await asyncio.wait_for(coro, timeout=LLM_TIMEOUT)
+    except asyncio.TimeoutError:
+        logger.error(f"   [TIMEOUT] {model}: exceeded {LLM_TIMEOUT}s")
+        return _error(f"Timeout: model did not respond within {LLM_TIMEOUT}s", start)
     except Exception as e:
         logger.error(f"   [FAIL] {model}: {e}")
         return _error(str(e), start)

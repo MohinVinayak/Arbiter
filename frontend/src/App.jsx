@@ -9,21 +9,30 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Cartes
 // 1. API SERVICE LAYER & CONSTANTS
 // ============================================================================
 // In dev: empty string → Vite proxy forwards /api/* to localhost:8000
-// In prod: VITE_API_URL is set to the Railway backend URL
+// In prod: VITE_API_URL is set to the Render backend URL
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 const KEYS_STORAGE_KEY = "arbiterApiKeys";
 
-/** Read user's own API keys from localStorage (never leaves the browser at rest). */
 function getStoredKeys() {
   try { return JSON.parse(localStorage.getItem(KEYS_STORAGE_KEY) || "{}"); }
   catch { return {}; }
+}
+
+function getWorkspaceId() {
+  let wid = localStorage.getItem("arbiterWorkspaceId");
+  if (!wid) {
+    wid = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    localStorage.setItem("arbiterWorkspaceId", wid);
+  }
+  return wid;
 }
 
 /** Build HTTP headers that carry the user's keys to the backend for this request only. */
 function buildKeyHeaders() {
   const k = getStoredKeys();
   const h = {};
+  h["X-Workspace-ID"] = getWorkspaceId();
   if (k.gemini_api_key)     h["X-Gemini-Key"]     = k.gemini_api_key;
   if (k.groq_api_key)       h["X-Groq-Key"]        = k.groq_api_key;
   if (k.openai_api_key)     h["X-OpenAI-Key"]      = k.openai_api_key;
@@ -37,7 +46,7 @@ function buildKeyHeaders() {
 
 /**
  * Central fetch wrapper — automatically adds:
- *   • API_BASE prefix (production Railway URL)
+ *   • API_BASE prefix (production Render URL)
  *   • Content-Type: application/json
  *   • X-*-Key headers (user's own keys, from localStorage)
  * Keys are sent over HTTPS and NEVER stored server-side.
@@ -344,9 +353,14 @@ export default function App() {
     resetSuiteForm();
   };
 
-  const handleDeleteSuite = () => {
+  const handleDeleteSuite = async () => {
     if (window.confirm("Are you sure you want to delete this test suite?")) {
-      setSuites(suites.filter(s => s.id !== editingSuiteId));
+      try {
+        await apiFetch(`/api/suites/${editingSuiteId}`, { method: "DELETE" });
+      } catch (e) {
+        console.error("Backend delete failed (removing locally):", e);
+      }
+      setSuites(prev => prev.filter(s => s.id !== editingSuiteId));
       setPage("dashboard");
       resetSuiteForm();
     }
@@ -381,7 +395,7 @@ export default function App() {
       };
       
       setEvalResults(newResult);
-      setRunHistory([newResult, ...runHistory]);
+      setRunHistory(prev => [newResult, ...prev]);
     } catch (error) {
       alert("Failed to run evaluation. Check your backend console.");
       setPage("dashboard");

@@ -30,7 +30,7 @@ def _run_single_check(output: str, check: dict) -> dict:
     elif t == "starts_with":      passed = output.strip().startswith(v)
     elif t == "is_json":
         try: import json; json.loads(output); passed = True
-        except: passed = False
+        except Exception: passed = False
     elif t == "regex_match":      passed = bool(re.search(v, output))
     return {"check": t, "value": v, "passed": passed}
 

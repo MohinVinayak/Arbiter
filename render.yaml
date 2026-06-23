@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: arbiter-backend
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port 10000
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: arbiter-db
+          property: connectionString
+
+databases:
+  - name: arbiter-db
+    databaseName: arbiter
+    user: arbiter
+    plan: free

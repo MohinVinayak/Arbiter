@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -35,62 +36,69 @@ class EvalRequest(BaseModel):
 # ── Core pipeline ─────────────────────────────────────────────────────────
 
 async def _run_eval(suite: TestSuite, models: list[str], judge_model: str,
-                    db: Session, resolved: dict):
-    run = Run(suite_id=suite.id, models=models, status="running")
+                    db: Session, resolved: dict, workspace_id: str = None):
+    run = Run(suite_id=suite.id, models=models, status="running", workspace_id=workspace_id)
     db.add(run)
     db.commit()
     db.refresh(run)
 
-    accum = {m: {"scores": [], "latencies": [], "reasoning": "", "tokens": 0, "cost": 0.0, "outputs": []} for m in models}
+    accum = {m: {"scores": [], "latencies": [], "reasonings": [], "tokens": 0, "cost": 0.0, "outputs": []} for m in models}
 
-    for tc in suite.test_cases:
-        prompt = tc.prompt_template
-        if tc.input_variables:
-            for k, v in tc.input_variables.items():
-                prompt = prompt.replace(f"{{{k}}}", str(v))
+    try:
+        for tc in suite.test_cases:
+            prompt = tc.prompt_template
+            if tc.input_variables:
+                for k, v in tc.input_variables.items():
+                    prompt = prompt.replace(f"{{{k}}}", str(v))
 
-        llm_outputs = await run_parallel(models, prompt, resolved)
+            llm_outputs = await run_parallel(models, prompt, resolved)
 
-        for model, res in llm_outputs.items():
-            if isinstance(res, Exception):
-                res = {"output": None, "latency_ms": 0, "tokens_used": 0, "cost_usd": 0.0, "error": str(res)}
+            for model, res in llm_outputs.items():
+                if isinstance(res, Exception):
+                    res = {"output": None, "latency_ms": 0, "tokens_used": 0, "cost_usd": 0.0, "error": str(res)}
 
-            output = res.get("output")
-            det    = run_deterministic_checks(output, tc.checks or [])
-            sem    = compute_semantic_score(output, tc.expected_output)
-            judge  = await run_llm_judge(prompt, output, tc.expected_output, judge_model=judge_model, resolved=resolved)
-            overall = compute_overall_score(det["score"], sem, judge["score"])
+                output = res.get("output")
+                det    = run_deterministic_checks(output, tc.checks or [])
+                sem    = await asyncio.to_thread(compute_semantic_score, output, tc.expected_output)
+                judge  = await run_llm_judge(prompt, output, tc.expected_output, judge_model=judge_model, resolved=resolved)
+                overall = compute_overall_score(det["score"], sem, judge["score"])
 
-            db.add(Result(
-                run_id=run.id, test_case_id=tc.id, model=model,
-                output=output, latency_ms=res.get("latency_ms"),
-                tokens_used=res.get("tokens_used"), cost_usd=res.get("cost_usd"),
-                deterministic_score=det["score"], semantic_score=sem,
-                judge_score=judge["score"], overall_score=overall,
-                check_details=det["details"], judge_reasoning=judge["reasoning"],
-                error=res.get("error"),
-            ))
+                db.add(Result(
+                    run_id=run.id, test_case_id=tc.id, model=model,
+                    output=output, latency_ms=res.get("latency_ms"),
+                    tokens_used=res.get("tokens_used"), cost_usd=res.get("cost_usd"),
+                    deterministic_score=det["score"], semantic_score=sem,
+                    judge_score=judge["score"], overall_score=overall,
+                    check_details=det["details"], judge_reasoning=judge["reasoning"],
+                    error=res.get("error"),
+                ))
 
-            if overall is not None: accum[model]["scores"].append(overall)
-            if res.get("latency_ms"): accum[model]["latencies"].append(res["latency_ms"])
-            if judge.get("reasoning"): accum[model]["reasoning"] = judge["reasoning"]
-            accum[model]["tokens"] += res.get("tokens_used") or 0
-            accum[model]["cost"]   += res.get("cost_usd")   or 0.0
-            accum[model]["outputs"].append(output)
+                if overall is not None: accum[model]["scores"].append(overall)
+                if res.get("latency_ms"): accum[model]["latencies"].append(res["latency_ms"])
+                if judge.get("reasoning"): accum[model]["reasonings"].append(judge["reasoning"])
+                accum[model]["tokens"] += res.get("tokens_used") or 0
+                accum[model]["cost"]   += res.get("cost_usd")   or 0.0
+                accum[model]["outputs"].append(output)
 
-    run.status = "completed"
-    run.completed_at = datetime.now(timezone.utc)
-    db.commit()
+        run.status = "completed"
+        run.completed_at = datetime.now(timezone.utc)
+    except Exception as e:
+        logger.error(f"Evaluation failed: {e}")
+        run.status = "failed"
+        run.completed_at = datetime.now(timezone.utc)
+    finally:
+        db.commit()
 
     metrics = []
     for model in models:
         a = accum[model]
         avg = round((sum(a["scores"]) / len(a["scores"])) * 100) if a["scores"] else 0
         lat = round(sum(a["latencies"]) / len(a["latencies"])) if a["latencies"] else 0
+        reasoning = "; ".join(a["reasonings"]) if a["reasonings"] else "No judge output."
         metrics.append({
             "id": model, "score": avg, "latency": lat,
             "status": "Passed" if avg >= 80 else "Review" if avg >= 70 else "Failed",
-            "reasoning": a["reasoning"] or "No judge output.",
+            "reasoning": reasoning,
             "outputs": a["outputs"], "tokens": a["tokens"], "cost": round(a["cost"], 6),
         })
 
@@ -115,7 +123,8 @@ async def run_evaluate(request: Request, body: EvalRequest, db: Session = Depend
     if bad:
         raise HTTPException(400, f"Models not available (key missing?): {bad}")
 
-    _, metrics = await _run_eval(suite, body.models, body.judgeId, db, resolved)
+    workspace_id = request.headers.get("X-Workspace-ID")
+    _, metrics = await _run_eval(suite, body.models, body.judgeId, db, resolved, workspace_id)
     return {"metrics": metrics}
 
 
@@ -125,21 +134,30 @@ async def create_run(request: Request, data: RunCreate, db: Session = Depends(ge
     suite = db.query(TestSuite).filter(TestSuite.id == data.suite_id).first()
     if not suite: raise HTTPException(404, "Suite not found")
     if not suite.test_cases: raise HTTPException(400, "Suite has no test cases.")
-    run, metrics = await _run_eval(suite, data.models, data.judge_model, db, resolved)
+    workspace_id = request.headers.get("X-Workspace-ID")
+    run, metrics = await _run_eval(suite, data.models, data.judge_model, db, resolved, workspace_id)
     return {"run_id": run.id, "status": run.status, "metrics": metrics}
 
 
 @router.get("/")
-def list_all_runs(db: Session = Depends(get_db)):
-    runs = db.query(Run).order_by(Run.created_at.desc()).limit(50).all()
-    return [{"id": r.id, "suite_name": (db.query(TestSuite).filter(TestSuite.id == r.suite_id).first() or type('x', (), {'name': 'Unknown'})()).name,
+def list_all_runs(request: Request, db: Session = Depends(get_db)):
+    workspace_id = request.headers.get("X-Workspace-ID")
+    query = db.query(Run)
+    if workspace_id:
+        query = query.filter(Run.workspace_id == workspace_id)
+    runs = query.order_by(Run.created_at.desc()).limit(50).all()
+    return [{"id": r.id, "suite_name": (db.query(TestSuite).filter(TestSuite.id == r.suite_id).first() or TestSuite(name="Unknown")).name,
              "models": r.models, "status": r.status, "created_at": r.created_at, "completed_at": r.completed_at}
             for r in runs]
 
 
 @router.get("/suite/{suite_id}")
-def get_runs_for_suite(suite_id: str, db: Session = Depends(get_db)):
-    runs = db.query(Run).filter(Run.suite_id == suite_id).order_by(Run.created_at.desc()).all()
+def get_runs_for_suite(suite_id: str, request: Request, db: Session = Depends(get_db)):
+    workspace_id = request.headers.get("X-Workspace-ID")
+    query = db.query(Run).filter(Run.suite_id == suite_id)
+    if workspace_id:
+        query = query.filter(Run.workspace_id == workspace_id)
+    runs = query.order_by(Run.created_at.desc()).all()
     return [{"id": r.id, "models": r.models, "status": r.status, "created_at": r.created_at, "result_count": len(r.results)} for r in runs]
 
 

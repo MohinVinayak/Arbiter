@@ -9,6 +9,7 @@ class TestSuite(Base):
     __tablename__ = "test_suites"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    workspace_id = Column(String, index=True, nullable=True)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

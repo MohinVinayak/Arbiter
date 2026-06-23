@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.test_suite import TestSuite, TestCase
@@ -28,8 +28,9 @@ class SuiteCreate(BaseModel):
 
 @router.post("")
 @router.post("/")
-def create_suite(data: SuiteCreate, db: Session = Depends(get_db)):
-    suite = TestSuite(name=data.name, description=data.description)
+def create_suite(data: SuiteCreate, request: Request, db: Session = Depends(get_db)):
+    workspace_id = request.headers.get("X-Workspace-ID")
+    suite = TestSuite(name=data.name, description=data.description, workspace_id=workspace_id)
     db.add(suite)
     db.flush()
 
@@ -52,8 +53,12 @@ def create_suite(data: SuiteCreate, db: Session = Depends(get_db)):
 
 @router.get("")
 @router.get("/")
-def list_suites(db: Session = Depends(get_db)):
-    suites = db.query(TestSuite).all()
+def list_suites(request: Request, db: Session = Depends(get_db)):
+    workspace_id = request.headers.get("X-Workspace-ID")
+    query = db.query(TestSuite)
+    if workspace_id:
+        query = query.filter(TestSuite.workspace_id == workspace_id)
+    suites = query.all()
     return [
         {
             "id": s.id,
@@ -67,8 +72,9 @@ def list_suites(db: Session = Depends(get_db)):
 
 
 @router.get("/{suite_id}")
-def get_suite(suite_id: str, db: Session = Depends(get_db)):
-    suite = _get_or_404(suite_id, db)
+def get_suite(suite_id: str, request: Request, db: Session = Depends(get_db)):
+    workspace_id = request.headers.get("X-Workspace-ID")
+    suite = _get_or_404(suite_id, db, workspace_id)
     return {
         "id": suite.id,
         "name": suite.name,
@@ -87,9 +93,10 @@ def get_suite(suite_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/{suite_id}")
-def update_suite(suite_id: str, data: SuiteCreate, db: Session = Depends(get_db)):
+def update_suite(suite_id: str, data: SuiteCreate, request: Request, db: Session = Depends(get_db)):
     """Replace a suite's metadata and test cases atomically."""
-    suite = _get_or_404(suite_id, db)
+    workspace_id = request.headers.get("X-Workspace-ID")
+    suite = _get_or_404(suite_id, db, workspace_id)
 
     suite.name = data.name
     suite.description = data.description
@@ -117,8 +124,9 @@ def update_suite(suite_id: str, data: SuiteCreate, db: Session = Depends(get_db)
 
 
 @router.delete("/{suite_id}")
-def delete_suite(suite_id: str, db: Session = Depends(get_db)):
-    suite = _get_or_404(suite_id, db)
+def delete_suite(suite_id: str, request: Request, db: Session = Depends(get_db)):
+    workspace_id = request.headers.get("X-Workspace-ID")
+    suite = _get_or_404(suite_id, db, workspace_id)
 
     from app.models.run import Run, Result
 
@@ -136,8 +144,11 @@ def delete_suite(suite_id: str, db: Session = Depends(get_db)):
 
 # ── Helpers ───────────────────────────────────────────────
 
-def _get_or_404(suite_id: str, db: Session) -> TestSuite:
-    suite = db.query(TestSuite).filter(TestSuite.id == suite_id).first()
+def _get_or_404(suite_id: str, db: Session, workspace_id: str = None) -> TestSuite:
+    query = db.query(TestSuite).filter(TestSuite.id == suite_id)
+    if workspace_id:
+        query = query.filter(TestSuite.workspace_id == workspace_id)
+    suite = query.first()
     if not suite:
         raise HTTPException(status_code=404, detail="Suite not found")
     return suite

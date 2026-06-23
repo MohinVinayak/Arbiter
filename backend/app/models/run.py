@@ -10,6 +10,7 @@ class Run(Base):
     __tablename__ = "runs"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    workspace_id = Column(String, index=True, nullable=True)
     suite_id = Column(String, ForeignKey("test_suites.id"), nullable=False)
     models = Column(JSON, nullable=False)       # e.g. ["google/gemini-2.0-flash", "groq/llama-3.3-70b-versatile"]
     status = Column(String, default="pending")  # pending | running | completed | failed
@@ -25,8 +26,8 @@ class Result(Base):
     __tablename__ = "results"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    run_id = Column(String, ForeignKey("runs.id"), nullable=False)
-    test_case_id = Column(String, ForeignKey("test_cases.id"), nullable=False)
+    run_id = Column(String, ForeignKey("runs.id"), nullable=False, index=True)
+    test_case_id = Column(String, ForeignKey("test_cases.id"), nullable=False, index=True)
 
     model = Column(String, nullable=False)           # e.g. "google/gemini-2.0-flash"
     output = Column(Text, nullable=True)             # Raw LLM response

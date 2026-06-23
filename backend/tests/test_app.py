@@ -1,4 +1,4 @@
-"""
+r"""
 Arbiter backend – integration + unit tests.
 Run with:  c:\EvalForge\backend\venv\Scripts\python.exe -m pytest tests/ -v
 """
@@ -11,18 +11,14 @@ from sqlalchemy.orm import sessionmaker
 # Override the database with an in-memory SQLite instance BEFORE importing app
 # ---------------------------------------------------------------------------
 import os
-os.environ["DATABASE_URL"] = "sqlite://"   # pure in-memory
+os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 
-from app.database import Base, get_db   # noqa: E402
-from app.main import app                # noqa: E402
+from app.database import Base, get_db, engine   # noqa: E402
+from app.main import app                        # noqa: E402
 
-_engine = create_engine(
-    "sqlite://",
-    connect_args={"check_same_thread": False},
-)
-Base.metadata.create_all(bind=_engine)
-_TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
-
+Base.metadata.drop_all(bind=engine)
+Base.metadata.create_all(bind=engine)
+_TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def _override_get_db():
     db = _TestingSession()
@@ -159,29 +155,18 @@ def test_create_suite_skips_blank_cases():
 # Settings CRUD
 # ---------------------------------------------------------------------------
 
-def test_get_settings_creates_row():
+def test_get_settings_returns_server_keys():
     r = client.get("/api/settings/")
     assert r.status_code == 200
     data = r.json()
-    assert "id" in data
-    assert "gemini_api_key" in data
+    assert "server_keys" in data
+    assert isinstance(data["server_keys"], dict)
 
 
-def test_update_settings():
+def test_settings_no_post():
+    """Settings endpoint is read-only — POST should return 405."""
     r = client.post("/api/settings/", json={"gemini_api_key": "test-key-abc"})
-    assert r.status_code == 200
-    assert r.json()["gemini_api_key"] == "test-key-abc"
-
-
-def test_update_settings_partial():
-    """Only provided fields should be updated."""
-    client.post("/api/settings/", json={"groq_api_key": "gsk_test"})
-    r = client.post("/api/settings/", json={"openai_api_key": "sk-test"})
-    assert r.status_code == 200
-    data = r.json()
-    assert data["openai_api_key"] == "sk-test"
-    # groq key persists
-    assert data["groq_api_key"] == "gsk_test"
+    assert r.status_code == 405
 
 
 # ---------------------------------------------------------------------------

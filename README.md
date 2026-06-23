@@ -47,7 +47,7 @@ A visual tour of the Arbiter evaluation platform in action.
 | Frontend | React + Vite, vanilla CSS, Framer Motion, Recharts |
 | Backend | FastAPI, Pydantic, SQLAlchemy ORM |
 | Database | SQLite (Local) / PostgreSQL (Production) |
-| Architecture| Vercel (Frontend Hosting) + Railway (Backend/DB) |
+| Architecture| Vercel (Frontend Hosting) + Render (Backend/DB) |
 | Orchestration | Docker Compose (Local Development) |
 
 ## Security & BYOK Architecture
@@ -164,12 +164,12 @@ Arbiter is designed to be easily deployed to modern serverless and containerized
 ### Frontend (Vercel)
 1. Push the repository to GitHub.
 2. Import the `frontend` directory into Vercel as a Vite project.
-3. Set the `VITE_API_URL` environment variable to your backend domain (e.g., `https://arbiter-backend.up.railway.app`).
+3. Set the `VITE_API_URL` environment variable to your backend domain (e.g., `https://arbiter-backend.onrender.com`).
 
-### Backend (Railway)
-1. Connect your GitHub repository to Railway.
-2. Railway will automatically detect the `railway.json` configuration in the `backend` directory.
-3. Provision a PostgreSQL database in Railway and link it to the backend service.
+### Backend (Render)
+1. Connect your GitHub repository to [Render](https://render.com).
+2. Render will automatically detect the `render.yaml` Blueprint configuration in the repository root.
+3. It will provision a PostgreSQL database (`arbiter-db`) and link it to the backend web service (`arbiter-backend`).
 4. The backend will automatically create all necessary tables upon startup.
 
 ## Injecting Custom Models
