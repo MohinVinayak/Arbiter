@@ -1,248 +1,185 @@
 # Arbiter — Interview Cheat Sheet
+### Strategy: Lead with WHY, not HOW. Architect first, coder second.
 
 > **Project**: Arbiter — LLM Evaluation Platform  
 > **Stack**: React + Vite (Vercel) | FastAPI (Render/Docker) | PostgreSQL (Neon)  
-> **Role**: I designed the system architecture and evaluation pipeline. I used Claude as a pair-programmer to accelerate implementation of the frontend and standard CRUD boilerplate.  
+> **Your role**: You designed the architecture, the evaluation pipeline, and the deployment. You used Claude as a pair-programmer to accelerate frontend components and standard CRUD boilerplate — like a senior engineer uses Copilot.  
 > **Live**: https://arbiter-umber.vercel.app/
 
 ---
 
-## 1. The 60-Second Pitch
+## How to Answer Any Question
 
-> *"I built Arbiter, an LLM evaluation platform. The core problem it solves: when you're building a product on top of an LLM, you need a systematic way to compare models. Arbiter lets you define test suites with prompts and expected outputs, fire them at multiple models simultaneously — GPT-4o, Gemini, Claude, Groq, etc. — and automatically score every response using three layers: deterministic rule checks, semantic similarity via sentence transformer embeddings, and an LLM-as-a-Judge. Results come back with scores, latency, cost, and the judge's reasoning, shown in charts. It's deployed on Vercel and Render with a Neon PostgreSQL backend."*
+**Broad question** (architecture, design, tradeoffs) → Go deep. This is your strongest ground.  
+**Specific but important** (how scoring works, how async works) → You know these. Answer confidently.  
+**Hyper-specific** (exact CSS, line of code, syntax) → Deflect honestly:
+> *"I'd check the codebase for the exact syntax — that was one of the parts I had Claude generate while I focused on the backend pipeline. But I can walk you through what it does and why we need it."*
 
----
-
-## 2. The Stack — and Why
-
-| Layer | Choice | Why |
-|---|---|---|
-| Frontend | React + Vite | Fast dev experience, component model fits the dashboard UI |
-| Backend | FastAPI (Python) | Native async support, auto-generates OpenAPI docs, great for ML-adjacent code |
-| Database | PostgreSQL (Neon) | ACID guarantees, relational model fits suites/runs/results naturally |
-| Hosting | Vercel + Render | Free tier, git-based auto-deploy, Vercel is instant for static frontends |
-| Containerisation | Docker | Bypasses Render's free-tier build command restrictions |
-
-**If asked: Why not Django?**  
-FastAPI is async-first. Django's ORM is synchronous. When you're firing 7+ LLM API calls in parallel per evaluation, you need a non-blocking event loop — Django would have required workarounds.
-
-**If asked: Why not MongoDB?**  
-The data is relational: a Suite has many TestCases, a Run has many Results, each Result belongs to a TestCase. SQL foreign keys and cascade deletes map to this perfectly. Also, SQL lets you run `AVG(semantic_score)` queries natively.
+The one sentence to internalize:
+> **"I understand the what and the why. The how is in the code, and I know where to find it."*
 
 ---
 
-## 3. The Evaluation Pipeline (Most Important Thing)
+## 1. The 60-Second Pitch (Memorize This)
 
-This is the core of the project. Know it cold.
+> *"I built Arbiter, an LLM evaluation platform. The problem it solves: when you're building a product on top of an LLM, you need a systematic way to benchmark models. Arbiter lets you define test suites with prompts and expected outputs, fire them at multiple models simultaneously — GPT-4o, Gemini, Claude, Groq, etc. — and automatically score every response using three layers: deterministic rule checks, semantic similarity via sentence transformer embeddings, and an LLM-as-a-Judge. Results come back with scores, latency, cost, and the judge's reasoning. It's deployed on Vercel and Render with a Neon PostgreSQL backend."*
+
+---
+
+## 2. The Stack — Lead With WHY
+
+Never just name the technology. Always follow with the reason.
+
+| Choice | The WHY |
+|---|---|
+| **FastAPI** over Django | Django's ORM is synchronous. When you're firing 7+ LLM API calls in parallel per evaluation, you need a non-blocking async event loop. FastAPI is async-first. |
+| **PostgreSQL** over MongoDB | The data is inherently relational — suites have test cases, runs have results. SQL gives referential integrity, cascade deletes, and lets you run `AVG(score)` queries natively. MongoDB would lose all of that. |
+| **BYOK** over server-stored keys | Never storing a user's API credentials in your database is a fundamental security principle. It eliminates an entire class of breach risk. |
+| **Workspace UUID** over full auth | For an MVP evaluation tool, a login system would be scope creep. The UUID pattern achieves the same data isolation with zero infrastructure overhead. It's also a direct stepping stone to JWT if the project needed to scale. |
+| **Docker** on Render | Render's free tier doesn't allow custom build/start commands. Docker puts the configuration inside the codebase, bypassing platform restrictions entirely. |
+| **asyncio.gather** | Turns O(n × m) sequential API calls into O(1) parallel calls. Without it, evaluating 5 models × 10 test cases = 50 sequential round trips, easily 2-3 minutes. With it, all 50 calls fire simultaneously. |
+
+---
+
+## 3. The Evaluation Pipeline — The Core of the Project
+
+This is the thing that makes Arbiter interesting. Know the WHY for each layer.
 
 ```
 User triggers run
        ↓
-Backend creates a Run row (status: "running")
+Backend creates Run row (status: "running")
        ↓
 asyncio.gather() fires ALL model calls simultaneously
        ↓
-For each (model × test_case) response:
-    Layer 1 → Deterministic checks
-    Layer 2 → Semantic similarity
-    Layer 3 → LLM-as-a-Judge
+For each response → 3-layer scoring
        ↓
-Weighted average → final score stored in DB
-       ↓
-Run status → "completed"
+Weighted average → stored in DB → status: "completed"
 ```
 
-### Layer 1 — Deterministic (weight: 40%)
-Rule-based checks: `max_length`, `must_contain`, `must_not_contain`, `is_json`, `regex_match`.  
-Each check is 0 or 1. Average across all checks = deterministic score.  
-**Why**: Fast, cheap, fully reproducible. Ground truth for structured output requirements.
+### Layer 1 — Deterministic (40% weight)
+**What**: Rule-based checks — `must_contain`, `must_not_contain`, `is_json`, `regex_match`, `max_length`.  
+**Why**: Cheap, fast, fully reproducible. Perfect for structured output requirements where there's a ground truth.  
+**Tradeoff**: Binary. Can't capture nuance — a response that's 90% correct gets the same 0 as one that's completely wrong.
 
-### Layer 2 — Semantic Similarity (weight: 30%)
-Model: `all-MiniLM-L6-v2` (sentence-transformers library, runs locally in the backend).  
-Encodes the model's actual output and the expected output into 384-dimensional embeddings.  
-Computes cosine similarity between the two vectors.  
-**Why**: Catches correct answers phrased differently. Pure string matching would miss synonyms and paraphrasing.
+### Layer 2 — Semantic Similarity (30% weight)
+**What**: Encode the model's output and the expected output into embeddings using `all-MiniLM-L6-v2`, then compute cosine similarity.  
+**Why**: Catches correct answers phrased differently. "The capital is Paris" and "Paris is the capital" score near 1.0 semantically but 0.0 on exact string match.  
+**Tradeoff**: Only available when there's an expected output. Embedding quality is limited by the model size.
 
-### Layer 3 — LLM-as-a-Judge (weight: 30%)
-A designated judge model (user selects from UI) receives a structured prompt:
-```
-Score this response from 0.0 to 1.0 for correctness, relevance, and clarity.
-Response: [model's output]
-Expected: [expected output]
-Return JSON: {"score": float, "reasoning": string}
-```
-The backend parses the JSON response and stores the score and reasoning.  
-**Why**: Catches nuanced quality that rules and embeddings miss, like hallucinations or off-topic answers.
+### Layer 3 — LLM-as-a-Judge (30% weight)
+**What**: A designated judge model scores the response 0.0–1.0 and provides reasoning in structured JSON.  
+**Why**: Catches hallucinations, off-topic answers, and quality issues that rules and embeddings miss entirely.  
+**Tradeoff**: Non-deterministic (judge can vary), expensive (extra API call), and biased toward verbosity and its own outputs. Mitigated by using a *different* model as the judge than the ones being evaluated.
 
 ### Score Aggregation
-```python
-final_score = (0.4 × deterministic) + (0.3 × semantic) + (0.3 × judge)
 ```
-If a layer returns `None` (e.g., no expected output → no semantic score), the weights re-normalise among the layers that did return a score.
-
----
-
-## 4. Async Orchestration
-
-**The key code pattern:**
-```python
-tasks = [run_llm(model, case, keys) for model in models for case in test_cases]
-results = await asyncio.gather(*tasks, return_exceptions=True)
+final = (0.4 × deterministic) + (0.3 × semantic) + (0.3 × judge)
 ```
-
-`asyncio.gather` fires ALL tasks concurrently. Instead of waiting 2s per model call sequentially (O(n × m) time), all calls happen in parallel (O(1) time relative to model/case count).
-
-**`return_exceptions=True`**: Critical — if one model's API returns a 429 or 503, the gather doesn't crash. It returns the exception object for that task and continues collecting the other results.
-
-**Provider differences:**
-- OpenAI, Groq, DeepSeek, Mistral, OpenRouter → all use OpenAI SDK with different `base_url` (they adopted the OpenAI API spec)
-- Anthropic → has its own native async client
-- Google Gemini → SDK is synchronous only, so we wrap it with `asyncio.to_thread()` to run it in a thread pool without blocking the event loop
+If a layer returns null (e.g., no expected output → no semantic score), the remaining weights re-normalise. The system degrades gracefully instead of crashing.
 
 ---
 
-## 5. BYOK Security Model
+## 4. Key Design Decisions — Tradeoff Answers
 
-**BYOK = Bring Your Own Key.**
+These are the questions that separate system thinkers from code monkeys.
 
-The flow:
-1. User enters their API keys on the Settings page
-2. Keys are saved to **browser localStorage only** — never sent to the backend for storage
-3. When running an evaluation, the frontend reads keys from localStorage and injects them as custom HTTP headers: `X-OpenAI-Key`, `X-Gemini-Key`, etc.
-4. The backend extracts these headers per-request, uses them for that request only
-5. Keys are temporarily held in **volatile RAM** (cached in `_client_cache` for connection reuse)
-6. When Render spins the container down after 15 min of inactivity, all keys in RAM are wiped
+**"Why parallel async instead of sequential calls?"**  
+> Sequential calls with 5 models × 10 test cases = 50 round trips, each 1-3 seconds. That's up to 2.5 minutes of waiting. Parallel reduces that to the time of the single slowest call — effectively O(1). The tradeoff is error handling complexity: `return_exceptions=True` in `asyncio.gather` means a single failed call doesn't kill the entire evaluation.
 
-**Why this is secure**: Keys are never written to disk, a database, or logs. Volatile RAM is the standard safe way to hold credentials during an active process lifecycle.
+**"Why three scoring layers instead of just using the LLM judge for everything?"**  
+> Pure LLM judging is non-deterministic, expensive, and biased. Deterministic checks are free and guaranteed reproducible. Semantic similarity is cheap and objective. The three layers create a system where each compensates for the others' weaknesses. It's the same principle as defense in depth in security.
 
-**If asked: "What's the risk?"**  
-If someone got access to the running process memory (extremely unlikely in a managed PaaS), they could read the keys. The mitigation for production would be a proper secrets manager like AWS Secrets Manager. For this project's threat model (student BYOK tool), it's the right tradeoff.
+**"Why not build login/authentication?"**  
+> For an evaluation tool where users bring their own API keys, a login system would require a user database, password hashing, session management, and token refresh logic — all infrastructure that adds risk without adding value for the core use case. The UUID workspace pattern achieves data isolation with a single DB column and one header. In a real product, you'd swap `X-Workspace-ID` for `Authorization: Bearer <JWT>` and filter by `user_id` — the query pattern is identical.
 
----
-
-## 6. Multi-Tenancy (Workspace Isolation)
-
-No login system. Instead, a stateless isolation pattern:
-
-1. On first visit, the frontend generates a UUID: `workspace_id = crypto.randomUUID()`
-2. Saved to localStorage, sent as `X-Workspace-ID` header on every request
-3. Backend filters ALL database queries by this ID:
-```python
-db.query(TestSuite).filter(TestSuite.workspace_id == workspace_id).all()
-```
-
-**Tradeoff**: If you clear localStorage, you "lose" your data. This was a deliberate choice — no need for passwords, no backend auth middleware, and it naturally sandboxes each user's data. The pattern is a stepping stone toward full JWT auth.
+**"What happens if a model API call fails mid-evaluation?"**  
+> Two layers of protection. First, `return_exceptions=True` in `asyncio.gather` means a failed call returns an exception object instead of crashing the gather. Second, the entire evaluation run is wrapped in a `try/finally` block — even if everything fails, the `finally` clause always updates the run status to "failed". This prevents "zombie runs" that stay stuck as "running" forever.
 
 ---
 
-## 7. Live Model Verification
+## 5. Security — BYOK Explained Simply
 
-When the dashboard loads, the frontend calls `GET /api/models`.  
-The backend fires a tiny `"hi"` prompt to **every configured model in parallel**.  
-Only models that respond successfully are returned to the frontend.  
-The result is cached for 5 minutes (TTL cache) to avoid spamming provider APIs.
+The flow in one sentence: **Keys live in the browser, travel as HTTP headers, exist in backend RAM only during the request, and are never written to disk or database.**
 
-**Why this matters**: Users only see models in the dropdown that their API keys actually have access to. No more mid-evaluation 401/403 crashes.
+1. User types API key into Settings page → saved to **browser localStorage only**
+2. On evaluation, frontend reads keys from localStorage → sends as `X-OpenAI-Key`, `X-Gemini-Key` HTTP headers
+3. Backend receives headers → uses keys for that request → caches authenticated client objects in RAM (for connection reuse efficiency)
+4. Render spins the container down after 15 min of inactivity → all RAM is wiped → keys gone
 
----
-
-## 8. Database Schema (4 tables)
-
-```
-test_suites
-  id (UUID)  name  description  workspace_id  created_at
-      |
-      | 1:N
-      ↓
-test_cases
-  id  suite_id (FK)  prompt  expected_output  checks (JSON)
-      |
-      | via runs
-      ↓
-runs
-  id  suite_id (FK)  models (JSON array)  judge_id  status  workspace_id  created_at
-      |
-      | 1:N
-      ↓
-results
-  id  run_id (FK)  test_case_id (FK)  model_id  actual_output
-  deterministic_score  semantic_score  judge_score  final_score
-  judge_reasoning  latency_ms  cost_usd  check_results (JSON)
-```
-
-**Cascade delete**: Deleting a suite → deletes its test cases, its runs, and those runs' results. Handled by SQLAlchemy FK `ondelete="CASCADE"`.
-
-**UUIDs as strings**: Used instead of integers for portability between SQLite (local dev) and PostgreSQL (production) without needing a migration.
+**The WHY**: Storing credentials in a database creates a single point of breach. If the database is compromised, every user's API key is exposed. BYOK eliminates that risk entirely by making the backend stateless with respect to credentials.
 
 ---
 
-## 9. Deployment Architecture
+## 6. Deployment — The Honest Story
 
 ```
 GitHub (MohinVinayak/Arbiter)
-    ├── /frontend  →  Vercel (auto-deploys on push to main)
-    └── /Dockerfile →  Render Web Service (Docker, free tier)
-                           ↓
-                     Neon PostgreSQL (free serverless Postgres)
+    ├── /frontend  →  Vercel  (auto-deploy on push)
+    └── Dockerfile →  Render  (Docker, free tier)
+                         ↓
+                  Neon PostgreSQL (free serverless Postgres)
 ```
 
-**Dockerfile at root** (not in `/backend`): Copies `backend/` into the image and runs uvicorn. This was necessary because Render's free tier doesn't allow setting custom Build/Start commands — it only accepts Docker deployments.
+**Why this exact combination**: Vercel is the best free frontend host — zero config, instant deploys. Render handles backend containers. Neon provides serverless Postgres without requiring a credit card for a second service.
 
-**`postgres://` → `postgresql://` rewrite**: Neon injects `postgres://` URLs. SQLAlchemy needs `postgresql://`. `database.py` does a string replace. It also strips the `?sslmode=require` query param (which `pg8000` doesn't support as a URL param) and instead injects a native Python `ssl_context` object.
+**The cold start problem**: Render's free tier spins down after 15 min of inactivity. First request wakes it up in ~30s. This is a known, documented tradeoff of free-tier hosting — not a bug.
 
-**Cold starts**: Render's free tier spins down after 15 min of inactivity. First request after that takes ~30s. Known tradeoff for free hosting.
-
----
-
-## 10. The "I Used Claude" Answer
-
-For any question about specific frontend code, CSS, or CRUD boilerplate:
-
-> *"I designed the system architecture and the evaluation pipeline myself. For the frontend components and the standard CRUD routes, I used Claude as a pair-programmer to generate the boilerplate — similar to how a senior engineer uses GitHub Copilot. It let me focus my engineering time on the complex problems: the async orchestration, the scoring pipeline, the database schema, and the deployment infrastructure."*
-
-This is completely honest, shows AI tool fluency, and redirects the conversation back to the parts you actually deeply understand.
+**The deployment challenge you solved**: Render's free tier restricts custom Build and Start commands. The solution was to put a Dockerfile at the repository root that encapsulates all configuration. The platform just runs the container — no platform-specific settings needed. This also makes the backend portable to any container host (AWS ECS, GCP Cloud Run, Railway) with zero changes.
 
 ---
 
-## 11. Top 10 Questions You Will Be Asked
+## 7. Weaknesses — Pre-Loaded Answers
 
-**Q: Walk me through your project.**  
-→ Use the 60-second pitch in Section 1. Then offer to go deeper on any layer.
-
-**Q: Why did you choose this tech stack?**  
-→ See Section 2. FastAPI for async, PostgreSQL for relational data, React for the UI.
-
-**Q: How does the scoring work?**  
-→ See Section 3. Three layers: deterministic, semantic, LLM judge. Weighted 40/30/30.
-
-**Q: How did you handle multiple API calls at once?**  
-→ See Section 4. `asyncio.gather` with `return_exceptions=True`. All calls fire simultaneously.
-
-**Q: How is security handled for the API keys?**  
-→ See Section 5. BYOK — localStorage → HTTP headers → volatile RAM only. Never stored in DB.
-
-**Q: How does multi-user isolation work without a login system?**  
-→ See Section 6. Browser-generated UUID sent as a header, used to filter all DB queries.
-
-**Q: What were the biggest technical challenges?**  
-→ (1) Preventing "zombie runs" — if a run crashed midway, it stayed stuck as "running". Fixed with `try/finally` that always sets status to "failed" on error. (2) `pg8000` incompatibility with Neon's `sslmode=require` URL param — fixed by stripping the param and injecting a native `ssl_context`.
-
-**Q: What would you improve if you had more time?**  
-→ Add real JWT authentication to replace the workspace isolation hack. Add a Redis cache for rate limiting. Support streaming LLM responses so results appear in real-time instead of all at once.
-
-**Q: How did you test it?**  
-→ `pytest` with FastAPI's `TestClient`. Tests cover suite CRUD, empty suite handling, and run evaluation. The test DB uses a file-based SQLite (`test.db`) rather than in-memory to avoid connection isolation issues with TestClient.
-
-**Q: Is it deployed? Can I see it?**  
-→ Yes. Frontend: https://arbiter-umber.vercel.app/ — The backend on Render's free tier spins down after inactivity so it may take 30s to wake up on first load.
-
----
-
-## 12. Honest Weaknesses (Have Answers Ready)
+Have these ready. Interviewers respect engineers who know their system's limits.
 
 | Weakness | Your Answer |
 |---|---|
-| No real auth | "Stateless workspace isolation was a deliberate MVP tradeoff. The UUID pattern is a direct stepping stone to JWT — swap `X-Workspace-ID` for `Authorization: Bearer` and filter by `user_id` instead." |
-| Render cold starts | "Known free-tier limitation. In production, you'd use a paid tier or keep-alive pings. I've written about this tradeoff in the README." |
-| LLM-as-a-Judge bias | "Judges tend to favor verbose answers and their own outputs. Mitigation: use a different model as the judge than the ones being evaluated, lower temperature, or use multi-judge consensus." |
-| Sentence model accuracy | "MiniLM is fast but not state-of-the-art. Could swap to OpenAI embeddings or a larger model like `e5-large-v2` for better quality at higher cost." |
+| No real auth | "Stateless workspace isolation was a deliberate MVP tradeoff. The pattern is a direct stepping stone to JWT — same query structure, just swap the header and filter column." |
+| Render cold starts | "Known free-tier limitation. In production you'd use a paid tier or a keep-alive ping strategy. The architecture is cloud-agnostic — the Dockerfile runs anywhere." |
+| LLM judge bias | "Judges favor verbose answers and their own outputs. The mitigation built in is using a *different* model as judge than those being evaluated, plus low temperature to reduce variance." |
+| No streaming | "Currently results arrive all-at-once after the full evaluation. Streaming via Server-Sent Events would let results appear in real-time — that's the most impactful UX improvement to add next." |
+
+---
+
+## 8. Top 10 Questions — Direct Answers
+
+**Q: Walk me through the project.**  
+→ Use Section 1 pitch. Offer to go deeper on any layer.
+
+**Q: Why this tech stack?**  
+→ FastAPI for async, PostgreSQL for relational integrity, React because the dashboard is component-heavy. See Section 2 for the full WHY on each choice.
+
+**Q: How does the scoring work?**  
+→ Three layers compensating for each other's weaknesses. Deterministic for ground truth, semantic for paraphrasing, LLM judge for quality. 40/30/30 weighted average. Degrades gracefully if a layer returns null.
+
+**Q: How did you handle calling multiple APIs at once?**  
+→ `asyncio.gather` fires all calls concurrently. `return_exceptions=True` ensures a single failure doesn't crash the group. Provider differences: Gemini SDK is sync-only, so we wrap it with `asyncio.to_thread`.
+
+**Q: How are API keys secured?**  
+→ BYOK. Never stored server-side. localStorage → HTTP headers → volatile RAM only. Container shutdown wipes everything.
+
+**Q: How does multi-user work without logins?**  
+→ Browser generates a UUID, sends it as a header, backend filters all DB queries by it. Same isolation as auth, zero infrastructure overhead.
+
+**Q: What was the hardest technical problem?**  
+→ Two things: (1) Preventing zombie runs — runs that crash and stay stuck as "running". Solved with `try/finally` always setting status to "failed". (2) Connecting to Neon's PostgreSQL — their connection string includes `?sslmode=require` which the `pg8000` driver doesn't support as a URL parameter. Had to strip it and inject a native Python `ssl_context` object instead.
+
+**Q: What would you improve with more time?**  
+→ Real JWT auth, Redis for rate limiting, streaming results via Server-Sent Events, and a prompt versioning system to track how score changes as prompts evolve.
+
+**Q: How did you test it?**  
+→ `pytest` with FastAPI's `TestClient`. Covers suite CRUD, empty suite edge cases, and evaluation runs. Uses file-based SQLite for the test DB to avoid thread isolation issues with TestClient.
+
+**Q: Is it live?**  
+→ Yes. https://arbiter-umber.vercel.app/ — Backend on Render free tier may take 30s to wake from cold start on first load.
+
+---
+
+## 9. What To Say About AI-Assisted Development
+
+For anything frontend, CRUD routes, or boilerplate:
+
+> *"I designed the system architecture and the evaluation pipeline. For the React components and standard API routes, I used Claude as a pair-programmer to generate the boilerplate — the same way a senior engineer uses GitHub Copilot. That freed me to focus on the complex engineering: the async orchestration, the multi-layer scoring system, the database schema, and getting the deployment pipeline working across Vercel, Render, and Neon."*
+
+This is completely honest, demonstrates AI tool fluency (which companies actively want), and redirects toward your actual strengths.
