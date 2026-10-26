@@ -106,7 +106,7 @@ node_service_runner -->|"Parallel calls"| node_openai
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/health` | Service liveness health check |
-| `GET` | `/api/models` | List verified models based on available API keys |
+| `GET` | `/api/models` | List models available based on active API keys |
 | `POST` | `/api/runs/evaluate/stream` | **Stream evaluation telemetry live via SSE** |
 | `POST` | `/api/runs/evaluate` | Execute evaluation and return full batch payload |
 | `GET` | `/api/runs` | List recent evaluation runs (joined-load optimized) |

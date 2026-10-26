@@ -1,3 +1,4 @@
+import json
 import re
 from app.services.llm_runner import run_llm
 
@@ -20,7 +21,6 @@ def _run_single_check(output: str, check: dict) -> dict:
     elif t == "starts_with":      passed = output.strip().startswith(v)
     elif t == "is_json":
         try:
-            import json
             json.loads(output)
             passed = True
         except Exception:

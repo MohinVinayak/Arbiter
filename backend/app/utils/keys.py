@@ -1,17 +1,20 @@
 import os
 
+# Verified active models available on free or low-cost tiers
 MODEL_CATALOGUE = {
     "google": ("gemini_api_key", [
-        "google/gemini-2.5-flash",
         "google/gemini-2.0-flash",
+        "google/gemini-1.5-flash",
+        "google/gemini-1.5-pro",
     ]),
     "groq": ("groq_api_key", [
         "groq/llama-3.3-70b-versatile",
         "groq/llama-3.1-8b-instant",
+        "groq/deepseek-r1-distill-llama-70b",
     ]),
     "openai": ("openai_api_key", [
-        "openai/gpt-4o",
         "openai/gpt-4o-mini",
+        "openai/gpt-4o",
     ]),
 }
 

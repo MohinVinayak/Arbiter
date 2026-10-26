@@ -35,25 +35,31 @@ app.include_router(suites.router, prefix="/api/suites", tags=["Test Suites"])
 app.include_router(runs.router, prefix="/api/runs", tags=["Runs"])
 app.include_router(settings.router, prefix="/api/settings", tags=["Settings"])
 
-# Cache for verified available models (5 min TTL)
-_model_cache: dict[str, tuple[float, list]] = {}
+# Cache verified available models by active credentials (5 min TTL)
+_model_cache: dict[str, tuple[float, list[str]]] = {}
 _MODEL_CACHE_TTL = 300
 
 
 @app.get("/api/models")
 async def list_available_models(request: Request):
-    """Return available models verified with active API keys."""
+    """
+    Return models verified as active.
+    Dispatches a parallel ping test across candidate models to filter out
+    invalid keys, quota exhaustion, or unaccessible models.
+    """
     resolved = get_resolved_keys(request=request)
     base_models = get_available_models(resolved)
 
+    # Return mock models immediately if no external provider keys are configured
     if not base_models or "mock/alpha-test" in base_models:
         return {"models": base_models}
 
-    cache_key = str(sorted(resolved.items())) + str(sorted(base_models))
+    cache_key = str(sorted(resolved.items()))
     cached = _model_cache.get(cache_key)
     if cached and (time.time() - cached[0]) < _MODEL_CACHE_TTL:
         return {"models": cached[1]}
 
+    # Live parallel ping to verify models respond
     results = await run_parallel(base_models, "hi", resolved)
     verified_models = [m for m in base_models if results.get(m) and not results[m].get("error")]
 

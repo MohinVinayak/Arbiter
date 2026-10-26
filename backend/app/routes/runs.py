@@ -37,6 +37,27 @@ class EvalRequest(BaseModel):
         return self.judgeId or self.judge_model or "google/gemini-2.0-flash"
 
 
+def _validate_run_request(body: EvalRequest, request: Request, db: Session) -> tuple[TestSuite, dict]:
+    """Validate suite existence, test cases, and model availability."""
+    suite_id = body.target_suite_id
+    if not suite_id:
+        raise HTTPException(400, "Missing suite_id parameter.")
+
+    suite = db.query(TestSuite).filter(TestSuite.id == suite_id).first()
+    if not suite:
+        raise HTTPException(404, f"Suite '{suite_id}' not found.")
+    if not suite.test_cases:
+        raise HTTPException(400, "Suite has no test cases.")
+
+    resolved = get_resolved_keys(request=request)
+    available = get_available_models(resolved)
+    bad = [m for m in body.models if m not in available and not m.startswith("mock/")]
+    if bad:
+        raise HTTPException(400, f"Models not available (key missing?): {bad}")
+
+    return suite, resolved
+
+
 async def _stream_eval_generator(suite: TestSuite, models: list[str], judge_model: str,
                                  db: Session, resolved: dict, workspace_id: str = None):
     """Core evaluation engine that yields real-time SSE progress events."""
@@ -162,22 +183,7 @@ async def _run_eval(suite: TestSuite, models: list[str], judge_model: str,
 @router.post("/evaluate/stream")
 async def run_evaluate_stream(request: Request, body: EvalRequest, db: Session = Depends(get_db)):
     """Stream real-time evaluation events via Server-Sent Events (SSE)."""
-    suite_id = body.target_suite_id
-    if not suite_id:
-        raise HTTPException(400, "Missing suite_id parameter.")
-
-    resolved = get_resolved_keys(request=request)
-    suite = db.query(TestSuite).filter(TestSuite.id == suite_id).first()
-    if not suite:
-        raise HTTPException(404, f"Suite '{suite_id}' not found.")
-    if not suite.test_cases:
-        raise HTTPException(400, "Suite has no test cases.")
-
-    available = get_available_models(resolved)
-    bad = [m for m in body.models if m not in available and not m.startswith("mock/")]
-    if bad:
-        raise HTTPException(400, f"Models not available (key missing?): {bad}")
-
+    suite, resolved = _validate_run_request(body, request, db)
     return StreamingResponse(
         _stream_eval_generator(suite, body.models, body.target_judge_model, db, resolved, request.headers.get("X-Workspace-ID")),
         media_type="text/event-stream",
@@ -193,22 +199,7 @@ async def run_evaluate_stream(request: Request, body: EvalRequest, db: Session =
 @router.post("/")
 async def run_evaluate(request: Request, body: EvalRequest, db: Session = Depends(get_db)):
     """Run evaluation and return complete aggregated results."""
-    suite_id = body.target_suite_id
-    if not suite_id:
-        raise HTTPException(400, "Missing suite_id parameter.")
-
-    resolved = get_resolved_keys(request=request)
-    suite = db.query(TestSuite).filter(TestSuite.id == suite_id).first()
-    if not suite:
-        raise HTTPException(404, f"Suite '{suite_id}' not found.")
-    if not suite.test_cases:
-        raise HTTPException(400, "Suite has no test cases.")
-
-    available = get_available_models(resolved)
-    bad = [m for m in body.models if m not in available and not m.startswith("mock/")]
-    if bad:
-        raise HTTPException(400, f"Models not available (key missing?): {bad}")
-
+    suite, resolved = _validate_run_request(body, request, db)
     run, metrics = await _run_eval(suite, body.models, body.target_judge_model, db, resolved, request.headers.get("X-Workspace-ID"))
     return {"run_id": run.id, "status": run.status, "metrics": metrics}
 

@@ -7,13 +7,13 @@ from openai import AsyncOpenAI
 
 logger = logging.getLogger("uvicorn.error")
 
-_client_cache: dict[frozenset, dict] = {}
+_client_cache: dict[tuple, dict] = {}
 LLM_TIMEOUT = 30  # seconds
 
 
 def _make_clients(resolved: dict) -> dict:
     """Create or retrieve cached API clients for Google, Groq, and OpenAI."""
-    cache_key = frozenset(sorted(resolved.items()))
+    cache_key = tuple(sorted(resolved.items()))
     if cache_key in _client_cache:
         return _client_cache[cache_key]
 
@@ -85,15 +85,19 @@ async def _run_oa(client, model_name: str, prompt: str, start: float):
 def _cost(model: str, tokens: int | None) -> float:
     if not tokens:
         return 0.0
+    # Blended commercial rates ($/1k tokens) for accurateish estimations
     rates = {
-        "gemini-2.5-flash": 0.000015,
-        "gemini-2.0-flash": 0.00001875,
         "gpt-4o": 0.005,
         "gpt-4o-mini": 0.0003,
+        "gemini-2.0-flash": 0.00015,
+        "gemini-1.5-flash": 0.00015,
+        "gemini-1.5-pro": 0.0025,
         "llama-3.3-70b-versatile": 0.0007,
-        "llama-3.1-8b-instant": 0.0001,
+        "llama-3.1-8b-instant": 0.00007,
+        "deepseek-r1-distill-llama-70b": 0.0007,
     }
-    return round((tokens / 1000) * rates.get(model, 0.0), 6)
+    rate = rates.get(model)
+    return round((tokens / 1000) * rate, 6) if rate else 0.0
 
 
 def _error(msg: str, start: float) -> dict:
