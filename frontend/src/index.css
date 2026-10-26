@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-/* --- THEME VARIABLES --- */
+/* Theme variables */
 :root, [data-theme="light"], [data-theme="dark"] {
   --bg-canvas: #000000; 
   --bg-surface: #111111; 
@@ -14,7 +14,7 @@
   --bg-glow-color: rgba(255, 255, 255, 0.02);
 }
 
-/* --- GLOBAL RESETS --- */
+/* Global resets */
 * { 
   box-sizing: border-box; 
   transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease; 
@@ -28,7 +28,7 @@ body {
   overflow-x: hidden; 
 }
 
-/* --- LAYOUT --- */
+/* Layout */
 .app-layout { 
   display: flex; 
   min-height: 100vh; 
@@ -52,7 +52,7 @@ body {
   align-items: center; 
 }
 
-/* --- AMBIENT BACKGROUND & CURSOR --- */
+/* Background and cursor */
 .ambient-background { 
   position: fixed; 
   inset: 0; 
@@ -99,8 +99,8 @@ body.hovering-run-eval .glow-orb {
 }
 
 @media (pointer: fine) { 
-  body { cursor: none; } 
-  a, button, input, textarea, select { cursor: none !important; } 
+  /* native cursor */ 
+   
   
   .custom-shadow-cursor { 
     position: fixed; 
@@ -138,7 +138,7 @@ body.hovering-run-eval .glow-orb {
   } 
 }
 
-/* --- SIDEBAR & NAVIGATION --- */
+/* Sidebar navigation */
 .sidebar { 
   width: 280px; 
   min-width: 280px; 
@@ -235,7 +235,7 @@ body.hovering-run-eval .glow-orb {
 .theme-toggle-text span { transition: color 0.2s ease, opacity 0.2s ease; } 
 .theme-toggle-text .active-theme { color: var(--text-main); font-weight: 600; opacity: 1; } 
 
-/* --- MODELS STACK --- */
+/* Active models */
 .models-stack { display: flex; flex-direction: column; gap: 8px; }
 
 .model-card { 
@@ -273,7 +273,7 @@ body.hovering-run-eval .glow-orb {
   border-radius: 50%; 
 }
 
-/* --- TYPOGRAPHY --- */
+/* Typography */
 .hero-title { 
   font-size: 44px; 
   letter-spacing: -0.04em; 
@@ -312,7 +312,7 @@ body.hovering-run-eval .glow-orb {
 
 .mono { font-family: 'JetBrains Mono', monospace; }
 
-/* --- CARDS & GRID --- */
+/* Cards and layout grids */
 .bento-grid { 
   display: grid; 
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); 
@@ -359,7 +359,7 @@ body.hovering-run-eval .glow-orb {
 .mb-6 { margin-bottom: 24px; }
 .mb-4 { margin-bottom: 16px; }
 
-/* --- PREMIUM ADD CARD --- */
+/* Create suite card */
 .premium-add-card { 
   min-height: 250px; 
   border: 1px solid var(--border); 
@@ -417,7 +417,7 @@ body.hovering-run-eval .glow-orb {
   color: var(--text-main); 
 }
 
-/* --- BUTTONS --- */
+/* Buttons */
 .btn-3d { 
   background: var(--text-main); 
   color: var(--bg-surface); 
@@ -450,7 +450,7 @@ body.hovering-run-eval .glow-orb {
   margin-top: 32px; 
 }
 
-/* --- FORMS & INPUTS --- */
+/* Forms and inputs */
 .input-group { margin-bottom: 20px; } 
 .input-group label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; }
 
@@ -473,7 +473,7 @@ body.hovering-run-eval .glow-orb {
 .case-card { padding-left: 48px; }
 .drag-handle { position: absolute; left: 16px; top: 32px; color: var(--border); font-size: 20px; cursor: grab;}
 
-/* --- DATA TABLES & STATES --- */
+/* Tables and states */
 .canvas-table { width: 100%; border-collapse: collapse; text-align: left;}
 .canvas-table th { color: var(--text-muted); font-size: 13px; padding: 16px; border-bottom: 1px solid var(--border); font-weight: 600; }
 .canvas-table td { padding: 16px; border-bottom: 1px solid var(--border); font-size: 14px; }

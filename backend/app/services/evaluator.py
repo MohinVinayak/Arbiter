@@ -1,19 +1,9 @@
 import re
 from app.services.llm_runner import run_llm
 
-_sentence_model = None
-
-def _get_sentence_model():
-    global _sentence_model
-    if _sentence_model is None:
-        from sentence_transformers import SentenceTransformer
-        _sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
-    return _sentence_model
-
-
-# ── Layer 1: Deterministic ─────────────────────────────────────────────────
 
 def run_deterministic_checks(output: str, checks: list) -> dict:
+    """Run rule-based checks: length, substring, JSON, and regex."""
     if not checks or not output:
         return {"score": None, "details": []}
     results = [_run_single_check(output, c) for c in checks]
@@ -29,29 +19,15 @@ def _run_single_check(output: str, check: dict) -> dict:
     elif t == "must_not_contain": passed = v.lower() not in output.lower()
     elif t == "starts_with":      passed = output.strip().startswith(v)
     elif t == "is_json":
-        try: import json; json.loads(output); passed = True
-        except Exception: passed = False
+        try:
+            import json
+            json.loads(output)
+            passed = True
+        except Exception:
+            passed = False
     elif t == "regex_match":      passed = bool(re.search(v, output))
     return {"check": t, "value": v, "passed": passed}
 
-
-# ── Layer 2: Semantic ──────────────────────────────────────────────────────
-
-def compute_semantic_score(output: str, expected: str) -> float | None:
-    if not expected or not output:
-        return None
-    try:
-        from sklearn.metrics.pairwise import cosine_similarity
-        model = _get_sentence_model()
-        embeddings = model.encode([output, expected])
-        return round(float(cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]), 4)
-    except Exception as e:
-        import logging
-        logging.getLogger("uvicorn.error").warning(f"Semantic scoring failed: {e}")
-        return None
-
-
-# ── Layer 3: LLM-as-Judge ──────────────────────────────────────────────────
 
 JUDGE_PROMPT = """You are an impartial evaluator. Score the following AI response on a scale of 0.0 to 1.0.
 
@@ -82,6 +58,7 @@ async def run_llm_judge(
     judge_model: str = "google/gemini-2.0-flash",
     resolved: dict = None,
 ) -> dict:
+    """Score model response quality using an LLM judge."""
     if not output:
         return {"score": 0.0, "reasoning": "No output to evaluate"}
 
@@ -110,13 +87,15 @@ def _parse_judge_response(response: str) -> dict:
         return {"score": None, "reasoning": "Could not parse judge response"}
 
 
-# ── Combined Score ─────────────────────────────────────────────────────────
-
-def compute_overall_score(deterministic, semantic, judge) -> float | None:
-    scores, weights = [], []
-    if deterministic is not None: scores.append(deterministic); weights.append(0.4)
-    if semantic    is not None: scores.append(semantic);    weights.append(0.3)
-    if judge       is not None: scores.append(judge);       weights.append(0.3)
-    if not scores: return None
-    total = sum(weights)
-    return round(sum(s * w for s, w in zip(scores, weights)) / total, 4)
+def compute_overall_score(deterministic: float | None, judge: float | None) -> float | None:
+    """
+    Weighted 2-tier score: 70% Judge reasoning + 30% Deterministic checks.
+    Returns available score if one tier is omitted.
+    """
+    if deterministic is not None and judge is not None:
+        return round((deterministic * 0.3) + (judge * 0.7), 4)
+    if deterministic is not None:
+        return round(deterministic, 4)
+    if judge is not None:
+        return round(judge, 4)
+    return None

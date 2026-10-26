@@ -7,8 +7,5 @@ router = APIRouter()
 @router.get("")
 @router.get("/")
 def get_settings():
-    """
-    Returns which providers have a server-side API key configured (True/False).
-    User keys are stored client-side only and are never sent to this endpoint.
-    """
+    """Return available server-side API key status."""
     return {"server_keys": get_env_key_status()}

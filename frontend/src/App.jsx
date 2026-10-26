@@ -1,13 +1,11 @@
 
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from "recharts";
 
-// ============================================================================
-// 1. API SERVICE LAYER & CONSTANTS
-// ============================================================================
+// API service layer & configuration
 // In dev: empty string → Vite proxy forwards /api/* to localhost:8000
 // In prod: VITE_API_URL is set to the Render backend URL
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -33,14 +31,9 @@ function buildKeyHeaders() {
   const k = getStoredKeys();
   const h = {};
   h["X-Workspace-ID"] = getWorkspaceId();
-  if (k.gemini_api_key)     h["X-Gemini-Key"]     = k.gemini_api_key;
-  if (k.groq_api_key)       h["X-Groq-Key"]        = k.groq_api_key;
-  if (k.openai_api_key)     h["X-OpenAI-Key"]      = k.openai_api_key;
-  if (k.anthropic_api_key)  h["X-Anthropic-Key"]   = k.anthropic_api_key;
-  if (k.openrouter_api_key) h["X-OpenRouter-Key"]  = k.openrouter_api_key;
-  if (k.github_token)       h["X-GitHub-Token"]    = k.github_token;
-  if (k.deepseek_api_key)   h["X-DeepSeek-Key"]    = k.deepseek_api_key;
-  if (k.mistral_api_key)    h["X-Mistral-Key"]      = k.mistral_api_key;
+  if (k.gemini_api_key) h["X-Gemini-Key"] = k.gemini_api_key;
+  if (k.groq_api_key)   h["X-Groq-Key"]   = k.groq_api_key;
+  if (k.openai_api_key) h["X-OpenAI-Key"] = k.openai_api_key;
   return h;
 }
 
@@ -96,38 +89,16 @@ function formatModelLabel(rawId) {
   return name.replace(/\b\w/g, l => l.toUpperCase()).trim();
 }
 
-// ============================================================================
-// 2. MAGNETIC BUTTON COMPONENT
-// ============================================================================
+// Button wrapper
 function MagneticButton({ children, className, onClick, style }) {
-  const ref = useRef(null);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-
-  const handleMouse = (e) => {
-    const { clientX, clientY } = e;
-    const { height, width, left, top } = ref.current.getBoundingClientRect();
-    const middleX = clientX - (left + width / 2);
-    const middleY = clientY - (top + height / 2);
-    setPosition({ x: middleX * 0.15, y: middleY * 0.15 });
-  };
-
-  const reset = () => setPosition({ x: 0, y: 0 });
-
   return (
-    <motion.button
-      ref={ref} className={className} style={style} onClick={onClick}
-      onMouseMove={handleMouse} onMouseLeave={reset}
-      animate={{ x: position.x, y: position.y }}
-      transition={{ type: "spring", stiffness: 400, damping: 25, mass: 0.5 }}
-    >
+    <button className={className} style={style} onClick={onClick}>
       {children}
-    </motion.button>
+    </button>
   );
 }
 
-// ============================================================================
-// 3. MAIN APPLICATION
-// ============================================================================
+// Main application
 export default function App() {
   const [page, setPage] = useState("dashboard");
   useEffect(() => {
@@ -139,6 +110,64 @@ export default function App() {
   const [judgeModel, setJudgeModel] = useState("");
   const [judgeDropdownOpen, setJudgeDropdownOpen] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
+
+    async function fetchStreamEval(suiteId, selectedModels, judgeId, onProgress) {
+    const baseUrl = API_BASE.replace(/\/$/, "");
+    const headers = {
+      "Content-Type": "application/json",
+      ...buildKeyHeaders(),
+    };
+
+    const response = await fetch(`${baseUrl}/api/runs/evaluate/stream`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ suiteId: String(suiteId), models: selectedModels, judgeId })
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(err.detail || `HTTP ${response.status}`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalMetrics = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop();
+
+      for (const chunk of lines) {
+        const trimmed = chunk.trim();
+        if (!trimmed.startsWith("data: ")) continue;
+        try {
+          const payload = JSON.parse(trimmed.slice(6));
+          if (payload.event === "start") {
+            if (onProgress) onProgress({ current: 0, total: payload.total_cases, text: `Evaluating case 1 of ${payload.total_cases}...` });
+          } else if (payload.event === "case_completed") {
+            const nextCase = Math.min(payload.case_index + 1, payload.total_cases);
+            if (onProgress) onProgress({ current: payload.case_index, total: payload.total_cases, text: payload.case_index < payload.total_cases ? `Evaluating case ${nextCase} of ${payload.total_cases}...` : `Synthesizing telemetry...` });
+          } else if (payload.event === "complete") {
+            finalMetrics = payload.metrics;
+          } else if (payload.event === "error") {
+            throw new Error(payload.message || "Evaluation error");
+          }
+        } catch (e) {
+          if (e.message && e.message.includes("Evaluation error")) throw e;
+          console.warn("SSE parse error:", e);
+        }
+      }
+    }
+
+    if (!finalMetrics) {
+      throw new Error("Stream closed before receiving complete metrics.");
+    }
+    return finalMetrics;
+  }
 
   async function fetchRealBackendEval(suiteId, selectedModels, judgeId) {
     try {
@@ -178,26 +207,49 @@ export default function App() {
     }
   };
 
-  useEffect(() => { refreshModels(); }, []);
+  const refreshSuites = async () => {
+    try {
+      const data = await apiFetch('/api/suites');
+      if (data && data.length > 0) {
+        setSuites(data);
+      } else {
+        const starter = await apiFetch('/api/suites', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: "Customer Support Eval",
+            description: "Testing sentiment analysis and de-escalation on upset users.",
+            cases: [
+              {
+                prompt_template: "A user says: 'My order has been delayed for 2 weeks. I want a refund!' Respond empathetically and professionally.",
+                expected_output: "Acknowledge the frustration, apologize for the delay, offer a refund or status check.",
+                checks: [{ type: "must_not_contain", value: "not our fault" }, { type: "min_length", value: 20 }]
+              }
+            ]
+          })
+        });
+        setSuites([starter]);
+      }
+    } catch (err) {
+      console.warn('Could not load suites from database:', err);
+    }
+  };
 
-  // --- Suite State Management ---
-  const [suites, setSuites] = useState(() => {
-    const saved = localStorage.getItem('evalSuites');
-    return saved ? JSON.parse(saved) : [
-      { id: "123e4567-e89b-12d3-a456-426614174000", name: "Customer Support Eval", description: "Testing sentiment analysis and tone mapping against angry users.", test_case_count: 1, cases: [{prompt_template: "User is angry.", expected_output: "De-escalate."}] },
-      { id: "123e4567-e89b-12d3-a456-426614174001", name: "Code Generation Checks", description: "Verifying React and Python boilerplate generation accuracy.", test_case_count: 1, cases: [{prompt_template: "Write a python flask app", expected_output: "Valid flask boilerplate"}] }
-    ];
-  });
+  useEffect(() => {
+    refreshModels();
+    refreshSuites();
+  }, []);
+
+  // Suite state (loaded dynamically from database)
+  const [suites, setSuites] = useState([]);
 
   const [runHistory, setRunHistory] = useState(() => {
     const saved = localStorage.getItem('evalHistory');
     return saved ? JSON.parse(saved) : [];
   });
 
-  useEffect(() => { localStorage.setItem('evalSuites', JSON.stringify(suites)); }, [suites]);
-  useEffect(() => { localStorage.setItem('evalHistory', JSON.stringify(runHistory)); }, [runHistory]);
+    useEffect(() => { localStorage.setItem('evalHistory', JSON.stringify(runHistory)); }, [runHistory]);
 
-  // --- Editor State ---
+  // Editor state
   const [editingSuiteId, setEditingSuiteId] = useState(null);
   const [newSuiteName, setNewSuiteName] = useState("");
   const [newSuiteDesc, setNewSuiteDesc] = useState("");
@@ -205,17 +257,15 @@ export default function App() {
   
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evalResults, setEvalResults] = useState(runHistory.length > 0 ? runHistory[0] : null);
+  const [evalProgress, setEvalProgress] = useState({ current: 0, total: 0, text: "" });
 
-  // --- Settings State (BYOK — keys stored in localStorage only, never the server) ---
+
+
+  // BYOK settings state (client-side only)
   const SETTINGS_FIELDS = [
-    { key: 'gemini_api_key',     label: 'Gemini API Key',              placeholder: 'AIza...',     provider: 'Google' },
-    { key: 'groq_api_key',       label: 'Groq API Key',                placeholder: 'gsk_...',     provider: 'Groq' },
-    { key: 'deepseek_api_key',   label: 'DeepSeek API Key',            placeholder: 'sk-...',      provider: 'DeepSeek' },
-    { key: 'mistral_api_key',    label: 'Mistral API Key',             placeholder: 'xxx...',      provider: 'Mistral' },
-    { key: 'openrouter_api_key', label: 'OpenRouter API Key',          placeholder: 'sk-or-...',   provider: 'OpenRouter' },
-    { key: 'openai_api_key',     label: 'OpenAI API Key',              placeholder: 'sk-proj-...', provider: 'OpenAI' },
-    { key: 'anthropic_api_key',  label: 'Anthropic API Key',           placeholder: 'sk-ant-...',  provider: 'Anthropic' },
-    { key: 'github_token',       label: 'GitHub Token (GPT-4o-mini)',  placeholder: 'ghp_...',     provider: 'GitHub' },
+    { key: 'gemini_api_key', label: 'Gemini API Key', placeholder: 'AIza...', provider: 'Google' },
+    { key: 'groq_api_key',   label: 'Groq API Key',   placeholder: 'gsk_...',  provider: 'Groq' },
+    { key: 'openai_api_key', label: 'OpenAI API Key', placeholder: 'sk-...',   provider: 'OpenAI' },
   ];
   // Load directly from localStorage on mount
   const [settingsData, setSettingsData] = useState(() => getStoredKeys());
@@ -242,45 +292,9 @@ export default function App() {
     setTimeout(() => { setSettingsSaving(false); setSettingsToast(null); }, 2000);
   };
 
-  // ── High-Performance Single Cursor & Background ──
-  const cursorRef = useRef(null);
-  const bgGlowRef = useRef(null);
-  const mousePos = useRef({ x: -1000, y: -1000 });
-  const bgPos = useRef({ x: -1000, y: -1000 });
 
-  useEffect(() => {
-    let rafId;
-    const renderFrame = () => {
-      if (cursorRef.current) { cursorRef.current.style.transform = `translate3d(${mousePos.current.x}px, ${mousePos.current.y}px, 0) translate(-50%, -50%)`; }
-      bgPos.current.x += (mousePos.current.x - bgPos.current.x) * 0.12;
-      bgPos.current.y += (mousePos.current.y - bgPos.current.y) * 0.12;
-      if (bgGlowRef.current) { bgGlowRef.current.style.transform = `translate3d(${bgPos.current.x}px, ${bgPos.current.y}px, 0) translate(-50%, -50%)`; }
-      rafId = requestAnimationFrame(renderFrame);
-    };
-    rafId = requestAnimationFrame(renderFrame);
 
-    const handleMouseMove = (e) => { mousePos.current.x = e.clientX; mousePos.current.y = e.clientY; };
-    const handleMouseOver = (e) => {
-      if (e.target.closest('.run-eval-btn')) {
-        document.body.classList.add('hovering-run-eval'); document.body.classList.remove('hovering-interactive');
-      } else if (e.target.closest('button, input, textarea, select, .floating-card, .drag-handle, .model-card')) {
-        document.body.classList.add('hovering-interactive'); document.body.classList.remove('hovering-run-eval');
-      } else {
-        document.body.classList.remove('hovering-interactive'); document.body.classList.remove('hovering-run-eval');
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
-    window.addEventListener('mouseover', handleMouseOver, { passive: true });
-
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseover', handleMouseOver);
-      cancelAnimationFrame(rafId);
-    };
-  }, []);
-
-  // --- Suite Operations ---
+  // Suite operations
   const resetSuiteForm = () => {
     setEditingSuiteId(null);
     setNewSuiteName("");
@@ -304,7 +318,7 @@ export default function App() {
     const finalCases = validCases.length > 0 ? validCases.map(c => {
       let parsedChecks = null;
       if (c.checks_json && c.checks_json.trim()) {
-        try { parsedChecks = JSON.parse(c.checks_json); } catch (e) { console.error("Invalid checks JSON"); }
+        try { parsedChecks = JSON.parse(c.checks_json); } catch { console.error("Invalid checks JSON"); }
       }
       return { prompt_template: c.prompt_template, expected_output: c.expected_output, checks: parsedChecks };
     }) : [{ prompt_template: "", expected_output: "", checks: null }];
@@ -372,18 +386,32 @@ export default function App() {
     
     setPage("results");
     setIsEvaluating(true);
+    const totalCases = suite.test_case_count || (suite.cases ? suite.cases.length : 1);
+    setEvalProgress({ current: 0, total: totalCases, text: `Starting evaluation across ${selectedModels.length} models...` });
 
     try {
-      const metrics = await fetchRealBackendEval(suite.id, selectedModels, judgeModel);
+      let metrics;
+      try {
+        metrics = await fetchStreamEval(suite.id, selectedModels, judgeModel, (progress) => {
+          setEvalProgress(progress);
+        });
+      } catch (streamErr) {
+        console.warn("Real-time stream failed, falling back to batch eval:", streamErr);
+        metrics = await fetchRealBackendEval(suite.id, selectedModels, judgeModel);
+      }
+
       const styledMetrics = metrics.map((m) => {
         const modelKey = m.id;
         return {
+          id: modelKey,
           name: models[modelKey]?.label || modelKey,
           color: models[modelKey]?.color || "#a1a1aa",
           score: Math.round(m.score || 0),
           latency: m.latency || 0,
           reasoning: m.reasoning || "No reasoning provided.",
-          outputs: m.outputs || []
+          outputs: m.outputs || [],
+          tokens: m.tokens || 0,
+          cost: m.cost || 0
         };
       });
       
@@ -397,7 +425,7 @@ export default function App() {
       setEvalResults(newResult);
       setRunHistory(prev => [newResult, ...prev]);
     } catch (error) {
-      alert("Failed to run evaluation. Check your backend console.");
+      alert("Failed to run evaluation: " + (error.message || "Check backend console."));
       setPage("dashboard");
     } finally {
       setIsEvaluating(false);
@@ -407,14 +435,10 @@ export default function App() {
   return (
     <>
       <div className="ambient-background">
-        <div ref={bgGlowRef} className="cursor-ambient-glow">
-          <div className="glow-orb"></div>
-        </div>
         <div className="dot-grid-overlay"></div>
       </div>
 
       <div className="app-layout">
-        <div ref={cursorRef} className="custom-shadow-cursor"></div>
 
 
 
@@ -455,7 +479,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* JUDGE SELECTOR (DROP-UP) */}
+          {/* Judge model selector */}
           <div className="judge-section">
             <div className="section-title">JUDGE MODEL</div>
             {isLoadingModels ? (
@@ -506,7 +530,7 @@ export default function App() {
         <main className="main-canvas">
           <AnimatePresence mode="wait">
             
-            {/* DASHBOARD */}
+            {/* Dashboard view */}
             {page === "dashboard" && (
               <motion.div key="dash" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-1000 mx-auto">
                 <header className="page-header">
@@ -544,7 +568,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {/* SUITE EDITOR */}
+            {/* Suite editor view */}
             {page === "new-suite" && (
               <motion.div key="new" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header">
@@ -595,7 +619,7 @@ export default function App() {
                 </div>
 
                 <div className="deploy-footer flex-between fade-in-delayed" style={{ marginTop: "32px", paddingBottom: "64px" }}>
-                  {/* DELETE BUTTON SHOWS IF WE ARE EDITING */}
+                  {/* Delete suite button */}
                   {editingSuiteId ? (
                     <button className="btn-text-danger" style={{fontSize: '14px', color: '#ff3b30'}} onClick={handleDeleteSuite}>Delete Suite</button>
                   ) : <div></div>}
@@ -607,7 +631,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {/* RESULTS PAGE */}
+            {/* Results view */}
             {page === "results" && (
               <motion.div key="res" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header flex-between align-start">
@@ -639,8 +663,29 @@ export default function App() {
                 {isEvaluating && (
                   <div className="floating-card empty-state stagger-anim" style={{ '--delay': '0.1s' }}>
                     <div className="spin-icon add-icon" style={{ color: 'var(--pop-primary)' }}>❖</div>
-                    <h3 className="card-title" style={{ marginBottom: 0 }}>Running Eval</h3>
-                    <p style={{ color: 'var(--text-muted)', marginTop: '16px' }}>Pinging {selectedModels.length} models across the suite. This may take a moment.</p>
+                    <h3 className="card-title" style={{ marginBottom: 0 }}>Running Evaluation</h3>
+                    <p style={{ color: 'var(--text-muted)', marginTop: '16px' }}>
+                      {evalProgress.text || `Pinging ${selectedModels.length} models across the suite...`}
+                    </p>
+                    {evalProgress.total > 0 && (
+                      <div style={{ width: '100%', maxWidth: '340px', marginTop: '20px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                          <span>Progress ({evalProgress.current}/{evalProgress.total})</span>
+                          <span>{Math.round((evalProgress.current / evalProgress.total) * 100)}%</span>
+                        </div>
+                        <div style={{ height: '6px', width: '100%', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              height: '100%',
+                              width: `${Math.round((evalProgress.current / evalProgress.total) * 100)}%`,
+                              background: 'var(--pop-primary)',
+                              borderRadius: '3px',
+                              transition: 'width 0.3s ease'
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -749,7 +794,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {/* SETTINGS PAGE */}
+            {/* Settings view */}
             {page === "settings" && (
               <motion.div key="settings" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="w-full max-w-800 mx-auto pb-12">
                 <header className="page-header">
@@ -777,7 +822,7 @@ export default function App() {
                 <div className="floating-card form-card stagger-anim" style={{ '--delay': '0.1s' }}>
                   <div className="section-title" style={{ marginBottom: '28px' }}>Your API Keys</div>
 
-                  {SETTINGS_FIELDS.map(({ key, label, placeholder, provider }) => {
+                  {SETTINGS_FIELDS.map(({ key, label, placeholder }) => {
                     const hasUserKey = !!(settingsData[key] || '').trim();
                     const hasServerKey = serverKeys[key];
                     return (
@@ -881,7 +926,7 @@ export default function App() {
           --shadow-hover: 0 30px 60px -15px rgba(255, 255, 255, 0.1); 
         }
 
-        * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
           font-family: 'Plus Jakarta Sans', sans-serif; 
@@ -896,7 +941,7 @@ export default function App() {
         .max-w-800 { max-width: 800px; }
         .mx-auto { margin-left: auto; margin-right: auto; }
 
-        /* ── ZERO LAG BACKGROUND ── */
+        /* Ambient background */
         .ambient-background { position: fixed; inset: 0; z-index: -2; overflow: hidden; background-color: var(--bg-canvas); }
         .cursor-ambient-glow { position: fixed; top: 0; left: 0; z-index: -1; pointer-events: none; will-change: transform; }
         .glow-orb {
@@ -913,10 +958,9 @@ export default function App() {
           background-size: 24px 24px; opacity: 0.5;
         }
 
-        /* ── ELEGANT SINGLE CURSOR ── */
+        /* Cursor styles */
         @media (pointer: fine) {
-          body { cursor: none; }
-          a, button, input, textarea, select, option { cursor: none !important; }
+          /* native hardware cursor */
           
           .custom-shadow-cursor {
             position: fixed; top: 0; left: 0; width: 12px; height: 12px;
@@ -996,7 +1040,7 @@ export default function App() {
         .stat-val { font-size: 24px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
         .stat-label { font-size: 13px; color: var(--text-muted); font-weight: 600; }
 
-        /* ── CREATIVE "BUILD SUITE" HOVER ── */
+        /* Interactive hover states */
         .empty-add-card { 
           position: relative; overflow: hidden; background: transparent; border: 2px dashed var(--border); box-shadow: none;
           align-items: center; justify-content: center; text-align: center; color: var(--text-muted);

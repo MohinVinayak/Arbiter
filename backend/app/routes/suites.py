@@ -1,14 +1,14 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from sqlalchemy.orm import Session, joinedload
+
 from app.database import get_db
 from app.models.test_suite import TestSuite, TestCase
-from pydantic import BaseModel
-from typing import Optional
+from app.models.run import Run, Result
 
 router = APIRouter()
 
-
-# ── Pydantic Schemas ──────────────────────────────────────
 
 class TestCaseCreate(BaseModel):
     prompt_template: str
@@ -20,11 +20,9 @@ class TestCaseCreate(BaseModel):
 class SuiteCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    test_cases: Optional[list[TestCaseCreate]] = []  # API clients
-    cases: Optional[list[TestCaseCreate]] = []        # frontend alias
+    test_cases: Optional[list[TestCaseCreate]] = []
+    cases: Optional[list[TestCaseCreate]] = []
 
-
-# ── Routes ────────────────────────────────────────────────
 
 @router.post("")
 @router.post("/")
@@ -34,17 +32,15 @@ def create_suite(data: SuiteCreate, request: Request, db: Session = Depends(get_
     db.add(suite)
     db.flush()
 
-    all_cases = data.test_cases or data.cases or []
-    for tc in all_cases:
-        if not tc.prompt_template.strip():
-            continue
-        db.add(TestCase(
-            suite_id=suite.id,
-            prompt_template=tc.prompt_template,
-            input_variables=tc.input_variables,
-            expected_output=tc.expected_output,
-            checks=tc.checks,
-        ))
+    for tc in (data.test_cases or data.cases or []):
+        if tc.prompt_template.strip():
+            db.add(TestCase(
+                suite_id=suite.id,
+                prompt_template=tc.prompt_template,
+                input_variables=tc.input_variables,
+                expected_output=tc.expected_output,
+                checks=tc.checks,
+            ))
 
     db.commit()
     db.refresh(suite)
@@ -55,10 +51,9 @@ def create_suite(data: SuiteCreate, request: Request, db: Session = Depends(get_
 @router.get("/")
 def list_suites(request: Request, db: Session = Depends(get_db)):
     workspace_id = request.headers.get("X-Workspace-ID")
-    query = db.query(TestSuite)
+    query = db.query(TestSuite).options(joinedload(TestSuite.test_cases))
     if workspace_id:
         query = query.filter(TestSuite.workspace_id == workspace_id)
-    suites = query.all()
     return [
         {
             "id": s.id,
@@ -67,14 +62,13 @@ def list_suites(request: Request, db: Session = Depends(get_db)):
             "test_case_count": len(s.test_cases),
             "created_at": s.created_at,
         }
-        for s in suites
+        for s in query.all()
     ]
 
 
 @router.get("/{suite_id}")
 def get_suite(suite_id: str, request: Request, db: Session = Depends(get_db)):
-    workspace_id = request.headers.get("X-Workspace-ID")
-    suite = _get_or_404(suite_id, db, workspace_id)
+    suite = _get_or_404(suite_id, db, request.headers.get("X-Workspace-ID"))
     return {
         "id": suite.id,
         "name": suite.name,
@@ -94,29 +88,21 @@ def get_suite(suite_id: str, request: Request, db: Session = Depends(get_db)):
 
 @router.put("/{suite_id}")
 def update_suite(suite_id: str, data: SuiteCreate, request: Request, db: Session = Depends(get_db)):
-    """Replace a suite's metadata and test cases atomically."""
-    workspace_id = request.headers.get("X-Workspace-ID")
-    suite = _get_or_404(suite_id, db, workspace_id)
-
+    suite = _get_or_404(suite_id, db, request.headers.get("X-Workspace-ID"))
     suite.name = data.name
     suite.description = data.description
 
-    # Replace all test cases
-    db.query(TestCase).filter(TestCase.suite_id == suite_id).delete(
-        synchronize_session=False
-    )
+    db.query(TestCase).filter(TestCase.suite_id == suite_id).delete(synchronize_session=False)
 
-    all_cases = data.test_cases or data.cases or []
-    for tc in all_cases:
-        if not tc.prompt_template.strip():
-            continue
-        db.add(TestCase(
-            suite_id=suite.id,
-            prompt_template=tc.prompt_template,
-            input_variables=tc.input_variables,
-            expected_output=tc.expected_output,
-            checks=tc.checks,
-        ))
+    for tc in (data.test_cases or data.cases or []):
+        if tc.prompt_template.strip():
+            db.add(TestCase(
+                suite_id=suite.id,
+                prompt_template=tc.prompt_template,
+                input_variables=tc.input_variables,
+                expected_output=tc.expected_output,
+                checks=tc.checks,
+            ))
 
     db.commit()
     db.refresh(suite)
@@ -125,27 +111,19 @@ def update_suite(suite_id: str, data: SuiteCreate, request: Request, db: Session
 
 @router.delete("/{suite_id}")
 def delete_suite(suite_id: str, request: Request, db: Session = Depends(get_db)):
-    workspace_id = request.headers.get("X-Workspace-ID")
-    suite = _get_or_404(suite_id, db, workspace_id)
+    suite = _get_or_404(suite_id, db, request.headers.get("X-Workspace-ID"))
 
-    from app.models.run import Run, Result
-
-    # Delete results → runs → test_cases → suite (respecting FK constraints)
     run_ids = [r.id for r in db.query(Run.id).filter(Run.suite_id == suite_id).all()]
     if run_ids:
-        db.query(Result).filter(Result.run_id.in_(run_ids)).delete(
-            synchronize_session=False
-        )
+        db.query(Result).filter(Result.run_id.in_(run_ids)).delete(synchronize_session=False)
     db.query(Run).filter(Run.suite_id == suite_id).delete(synchronize_session=False)
     db.delete(suite)
     db.commit()
     return {"message": "Suite deleted"}
 
 
-# ── Helpers ───────────────────────────────────────────────
-
 def _get_or_404(suite_id: str, db: Session, workspace_id: str = None) -> TestSuite:
-    query = db.query(TestSuite).filter(TestSuite.id == suite_id)
+    query = db.query(TestSuite).options(joinedload(TestSuite.test_cases)).filter(TestSuite.id == suite_id)
     if workspace_id:
         query = query.filter(TestSuite.workspace_id == workspace_id)
     suite = query.first()

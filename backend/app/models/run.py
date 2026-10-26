@@ -1,18 +1,18 @@
+import uuid
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON, Float, Integer
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
-import uuid
 
 
 class Run(Base):
-    """A single execution of a test suite against one or more models."""
+    """Execution of a test suite against target models."""
     __tablename__ = "runs"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     workspace_id = Column(String, index=True, nullable=True)
     suite_id = Column(String, ForeignKey("test_suites.id"), nullable=False)
-    models = Column(JSON, nullable=False)       # e.g. ["google/gemini-2.0-flash", "groq/llama-3.3-70b-versatile"]
+    models = Column(JSON, nullable=False)
     status = Column(String, default="pending")  # pending | running | completed | failed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -22,27 +22,25 @@ class Run(Base):
 
 
 class Result(Base):
-    """Output + scores for one test case × one model."""
+    """Inference output and evaluation scores for one test case and model."""
     __tablename__ = "results"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     run_id = Column(String, ForeignKey("runs.id"), nullable=False, index=True)
     test_case_id = Column(String, ForeignKey("test_cases.id"), nullable=False, index=True)
 
-    model = Column(String, nullable=False)           # e.g. "google/gemini-2.0-flash"
-    output = Column(Text, nullable=True)             # Raw LLM response
-    latency_ms = Column(Integer, nullable=True)      # How long it took
-    tokens_used = Column(Integer, nullable=True)     # Token count
-    cost_usd = Column(Float, nullable=True)          # Estimated cost
+    model = Column(String, nullable=False)
+    output = Column(Text, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    tokens_used = Column(Integer, nullable=True)
+    cost_usd = Column(Float, nullable=True)
 
-    # Scores
-    deterministic_score = Column(Float, nullable=True)  # Rule-based checks (0-1)
-    semantic_score = Column(Float, nullable=True)        # Embedding similarity (0-1)
-    judge_score = Column(Float, nullable=True)           # LLM-as-judge (0-1)
-    overall_score = Column(Float, nullable=True)         # Weighted average
+    deterministic_score = Column(Float, nullable=True)
+    judge_score = Column(Float, nullable=True)
+    overall_score = Column(Float, nullable=True)
 
-    check_details = Column(JSON, nullable=True)   # Per-check pass/fail breakdown
-    judge_reasoning = Column(Text, nullable=True) # Why the judge gave this score
-    error = Column(Text, nullable=True)           # If the LLM call failed
+    check_details = Column(JSON, nullable=True)
+    judge_reasoning = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
 
     run = relationship("Run", back_populates="results")

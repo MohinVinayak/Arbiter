@@ -2,6 +2,7 @@ r"""
 Arbiter backend – integration + unit tests.
 Run with:  c:\EvalForge\backend\venv\Scripts\python.exe -m pytest tests/ -v
 """
+import json
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -170,7 +171,7 @@ def test_settings_no_post():
 
 
 # ---------------------------------------------------------------------------
-# Runs list (no eval — avoids hitting real APIs in CI)
+# Runs list & Eval tests
 # ---------------------------------------------------------------------------
 
 def test_list_runs_empty():
@@ -194,6 +195,70 @@ def test_evaluate_no_test_cases():
         json={"suiteId": suite["id"], "models": ["google/gemini-2.0-flash"]},
     )
     assert r.status_code == 400
+
+
+def test_evaluate_stream_missing_suite():
+    r = client.post(
+        "/api/runs/evaluate/stream",
+        json={"suiteId": "does-not-exist", "models": ["google/gemini-2.0-flash"]},
+    )
+    assert r.status_code == 404
+
+
+def test_evaluate_stream_no_test_cases():
+    suite = _create_suite({"name": "EmptyStream", "cases": []})
+    r = client.post(
+        "/api/runs/evaluate/stream",
+        json={"suiteId": suite["id"], "models": ["google/gemini-2.0-flash"]},
+    )
+    assert r.status_code == 400
+
+
+def test_evaluate_stream_success(monkeypatch):
+    async def mock_run_parallel(models, prompt, resolved):
+        return {m: {"output": "Mock output", "latency_ms": 100, "tokens_used": 10, "cost_usd": 0.0001, "error": None} for m in models}
+
+    async def mock_run_llm_judge(prompt, output, expected, judge_model, resolved):
+        return {"score": 0.9, "reasoning": "Mock judge reasoning"}
+
+    monkeypatch.setattr("app.routes.runs.run_parallel", mock_run_parallel)
+    monkeypatch.setattr("app.routes.runs.run_llm_judge", mock_run_llm_judge)
+
+    suite = _create_suite()
+    r = client.post(
+        "/api/runs/evaluate/stream",
+        json={"suiteId": suite["id"], "models": ["mock/test-model"]},
+    )
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers["content-type"]
+    lines = [l for l in r.text.strip().split("\n\n") if l.startswith("data: ")]
+    events = [json.loads(l[6:]) for l in lines]
+    event_names = [e["event"] for e in events]
+    assert "start" in event_names
+    assert "case_completed" in event_names
+    assert "complete" in event_names
+
+
+def test_evaluate_batch_success(monkeypatch):
+    async def mock_run_parallel(models, prompt, resolved):
+        return {m: {"output": "Mock output", "latency_ms": 100, "tokens_used": 10, "cost_usd": 0.0001, "error": None} for m in models}
+
+    async def mock_run_llm_judge(prompt, output, expected, judge_model, resolved):
+        return {"score": 0.9, "reasoning": "Mock judge reasoning"}
+
+    monkeypatch.setattr("app.routes.runs.run_parallel", mock_run_parallel)
+    monkeypatch.setattr("app.routes.runs.run_llm_judge", mock_run_llm_judge)
+
+    suite = _create_suite()
+    r = client.post(
+        "/api/runs/evaluate",
+        json={"suiteId": suite["id"], "models": ["mock/test-model"]},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "completed"
+    assert len(data["metrics"]) == 1
+    assert data["metrics"][0]["id"] == "mock/test-model"
 
 
 # ---------------------------------------------------------------------------
@@ -271,21 +336,22 @@ def test_deterministic_multiple_checks_partial():
     assert result["score"] == 0.5
 
 
-def test_compute_overall_all_three():
-    score = compute_overall_score(1.0, 1.0, 1.0)
+def test_compute_overall_both_layers():
+    score = compute_overall_score(1.0, 1.0)
     assert score == 1.0
 
 
 def test_compute_overall_none_inputs():
-    score = compute_overall_score(None, None, None)
+    score = compute_overall_score(None, None)
     assert score is None
 
 
-def test_compute_overall_two_layers():
-    # 0.4 weight det + 0.3 weight judge → weighted avg = (1.0*0.4 + 0.5*0.3) / 0.7
-    score = compute_overall_score(1.0, None, 0.5)
-    expected = round((1.0 * 0.4 + 0.5 * 0.3) / 0.7, 4)
-    assert abs(score - expected) < 0.001
+def test_compute_overall_one_layer():
+    # 70% Judge / 30% Deterministic: (1.0 * 0.3) + (0.5 * 0.7) = 0.65
+    score = compute_overall_score(1.0, 0.5)
+    assert score == 0.65
+    assert compute_overall_score(0.8, None) == 0.8
+    assert compute_overall_score(None, 0.9) == 0.9
 
 
 def test_parse_judge_response_valid():
